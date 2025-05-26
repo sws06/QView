@@ -1,0 +1,77 @@
+FILE: gui.py
+START_TAG:         self.settings_win.title("QView Settings")
+END_TAG:         self.settings_win.geometry("400x220") # Adjusted size
+CONTENT:
+        self.settings_win.title("QView Settings")
+
+        try:
+            dialog_bg = self.style.lookup("TFrame", "background")
+        except tk.TclError:
+            dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
+        self.settings_win.configure(bg=dialog_bg)
+
+        self.settings_win.geometry("400x255") # Increased height
+---
+FILE: gui.py
+START_TAG:         resources = {
+            "QAnon.pub": "https://qanon.pub/",
+            "Q Posts Online (qposts.online)": "https://qposts.online/",
+            "Q Agg (qagg.news)": "https://qagg.news/"
+        }
+END_TAG:         }
+CONTENT:
+        resources = {
+            "QAnon.pub": "https://qanon.pub/",
+            # "Q Posts Online (qposts.online)": "https://qposts.online/", # Removed
+            "Q Agg (qagg.news)": "https://qagg.news/"
+        }
+---
+FILE: gui.py
+START_TAG:     # --- END DELTA_SEARCH_LOGIC ---
+END_TAG:     # --- START DOWNLOAD_WINDOW_AND_THREADING ---
+CONTENT:
+    # --- END DELTA_SEARCH_LOGIC ---
+
+    # --- START MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
+    def _on_mousewheel(self, event, canvas_widget):
+        # For Windows and macOS
+        if event.delta: # Windows/macOS specific
+             canvas_widget.yview_scroll(int(-1*(event.delta/120)), "units")
+        # elif event.num == 4: # Linux scroll up (alternative check if delta not present)
+        #    canvas_widget.yview_scroll(-1, "units")
+        # elif event.num == 5: # Linux scroll down
+        #    canvas_widget.yview_scroll(1, "units")
+
+    def _on_scroll_up(self, event, canvas_widget):
+        # For Linux Button-4
+        canvas_widget.yview_scroll(-1, "units")
+
+    def _on_scroll_down(self, event, canvas_widget):
+        # For Linux Button-5
+        canvas_widget.yview_scroll(1, "units")
+    # --- END MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
+
+    # --- START DOWNLOAD_WINDOW_AND_THREADING ---
+---
+FILE: gui.py
+START_TAG:         ttk.Button(close_button_frame, text="Close", command=help_win.destroy).pack(pady=(0,5)) 
+    # --- END SHOW_HELP_WINDOW ---
+END_TAG:     # --- END SHOW_HELP_WINDOW ---
+CONTENT:
+        ttk.Button(close_button_frame, text="Close", command=help_win.destroy).pack(pady=(0,5))
+
+        # Bind mouse wheel scrolling for the help window
+        # It's important to bind to the canvas, the scrollable frame, AND its direct children (labels)
+        # to ensure scrolling works when the mouse is over any of these parts.
+        widgets_to_bind_scroll = [canvas, scrollable_content_frame]
+        # Add direct children of scrollable_content_frame (Labels, etc.)
+        for child in scrollable_content_frame.winfo_children():
+            widgets_to_bind_scroll.append(child)
+
+        for widget in widgets_to_bind_scroll:
+            # For Windows and macOS (MouseWheel event provides 'delta')
+            widget.bind("<MouseWheel>", lambda e, cw=canvas: self._on_mousewheel(e, cw), add="+")
+            # For Linux (Button-4 for scroll up, Button-5 for scroll down)
+            widget.bind("<Button-4>", lambda e, cw=canvas: self._on_scroll_up(e, cw), add="+")
+            widget.bind("<Button-5>", lambda e, cw=canvas: self._on_scroll_down(e, cw), add="+")
+    # --- END SHOW_HELP_WINDOW ---

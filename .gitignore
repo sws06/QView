@@ -1,0 +1,20 @@
+# Ignore user-specific data, downloaded content, and caches
+user_data/
+posts_df.pkl # If it's in the root, but we plan to move it to user_data
+
+# If you have these folders directly in the root (before user_data was created)
+# Or if you want to be extra sure even if they are in user_data.
+q_images/
+linked_articles/
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / Editor specific (optional, but good practice)
+.vscode/
+.idea/
+*.swp
+*.swo
