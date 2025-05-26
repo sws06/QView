@@ -33,6 +33,7 @@ except OSError as e:
 DATAFRAME_PICKLE_PATH = os.path.join(USER_DATA_ROOT, "posts_df.pkl")
 BOOKMARKS_FILE_PATH = os.path.join(USER_DATA_ROOT, "q_gui_bookmarks.dat")
 SETTINGS_FILE_PATH = os.path.join(USER_DATA_ROOT, "settings.json")
+USER_NOTES_FILE_PATH = os.path.join(USER_DATA_ROOT, "user_notes.json")
 
 IMAGE_DIR_NAME = "q_images" # Just the name, not used for full path construction here
 IMAGE_DIR = os.path.join(USER_DATA_ROOT, IMAGE_DIR_NAME) # Full path

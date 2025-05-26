@@ -108,8 +108,10 @@ class QPostViewer:
         # self.effective_qffline_mode = settings.DEFAULT_SETTINGS["qffline_mode"] # Removed
 
         self.bookmarked_posts = utils.load_bookmarks_from_file(config.BOOKMARKS_FILE_PATH)
+        self.user_notes = utils.load_user_notes(config.USER_NOTES_FILE_PATH) # Load user notes
 
-        self.df_all_posts = app_data.load_or_parse_data()
+        self.df_all_posts = app_data.load_or_parse_data()     
+
         if self.df_all_posts is None or self.df_all_posts.empty:
             messagebox.showerror("Error", "No posts loaded. Exiting.")
             self.root.destroy(); return
@@ -171,6 +173,25 @@ class QPostViewer:
         self.image_display_frame = ttk.Frame(self.details_outer_frame)
         self.image_display_frame.grid(row=1, column=0, sticky="nswe", pady=(5,0))
         self.image_display_frame.grid_columnconfigure(0, weight=1)
+
+        # --- Notes Frame ---
+        self.notes_frame = ttk.Labelframe(self.details_outer_frame, text="User Note", padding=(10,5))
+        self.notes_frame.grid(row=2, column=0, sticky="nswe", pady=(5,0))
+        self.details_outer_frame.grid_rowconfigure(2, weight=1) # Give notes section some weight
+
+        self.notes_frame.grid_columnconfigure(0, weight=1)
+        self.notes_frame.grid_rowconfigure(0, weight=1)
+
+        self.note_text_area = tk.Text(self.notes_frame, wrap=tk.WORD, height=5, font=("TkDefaultFont", 10), relief=tk.FLAT, borderwidth=1, padx=5, pady=5)
+        self.note_text_area.grid(row=0, column=0, sticky="nswe")
+        self.note_text_scrollbar = ttk.Scrollbar(self.notes_frame, orient="vertical", command=self.note_text_area.yview)
+        self.note_text_area.configure(yscrollcommand=self.note_text_scrollbar.set)
+        self.note_text_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.edit_save_note_button = ttk.Button(self.notes_frame, text="Edit Note", command=self.toggle_note_edit_mode, width=10)
+        self.edit_save_note_button.grid(row=1, column=0, columnspan=2, pady=(5,0), sticky="e")
+        self.edit_save_note_button.config(state=tk.DISABLED)
+        # --- End Notes Frame ---
 
         self.post_text_area.bind("<KeyPress>", self._prevent_text_edit)
         self.configure_text_tags()
@@ -299,6 +320,7 @@ class QPostViewer:
     # --- START ON_CLOSING ---
     def on_closing(self):
         utils.save_bookmarks_to_file(self.bookmarked_posts, config.BOOKMARKS_FILE_PATH)
+        utils.save_user_notes(self.user_notes, config.USER_NOTES_FILE_PATH) # Save user notes
         self.root.destroy()
     # --- END ON_CLOSING ---
 
@@ -495,7 +517,12 @@ class QPostViewer:
             self.post_text_area.insert(tk.END, "No post selected."); self.post_text_area.config(state=tk.DISABLED)
             if hasattr(self, 'show_links_button'): self.show_links_button.config(state=tk.DISABLED)
             if hasattr(self, 'view_article_button'): self.view_article_button.config(text="Article Not Saved", state=tk.DISABLED, command=lambda: None)
-            self.update_post_number_label(); self.update_bookmark_button_status(); return
+            self.update_post_number_label(); self.update_bookmark_button_status()
+            # Clear and disable notes area if no post selected
+            self.note_text_area.config(state=tk.NORMAL); self.note_text_area.delete(1.0, tk.END)
+            self.note_text_area.config(state=tk.DISABLED)
+            self.edit_save_note_button.config(text="Edit Note", state=tk.DISABLED)
+            return
 
         original_df_index = self.df_displayed.index[self.current_display_idx]
         post = self.df_all_posts.loc[original_df_index]
@@ -579,6 +606,18 @@ class QPostViewer:
         if hasattr(self, 'show_links_button'):
             if self.current_post_urls: self.show_links_button.config(state=tk.NORMAL)
             else: self.show_links_button.config(state=tk.DISABLED)
+        
+        # --- Update User Note Area ---
+        self.note_text_area.config(state=tk.NORMAL)
+        self.note_text_area.delete(1.0, tk.END)
+        # Use string representation of original_df_index for dictionary keys
+        current_note = self.user_notes.get(str(original_df_index), "")
+        if current_note:
+            self.note_text_area.insert(tk.END, current_note)
+        self.note_text_area.config(state=tk.DISABLED)
+        self.edit_save_note_button.config(text="Edit Note", state=tk.NORMAL)
+        # --- End Update User Note Area ---
+
         self.post_text_area.config(state=tk.DISABLED); self.update_post_number_label(); self.update_bookmark_button_status()
     # --- END UPDATE_DISPLAY ---
 
@@ -738,7 +777,8 @@ class QPostViewer:
         resources = {
             "QAnon.pub": "https://qanon.pub/",
             # "Q Posts Online (qposts.online)": "https://qposts.online/", # Removed
-            "Q Agg (qagg.news)": "https://qagg.news/"
+            "Q Agg (qagg.news)": "https://qagg.news/",
+            "Gematrix.org": "https://www.gematrix.org/" # Added Gematrix
         }
 
         for text, url in resources.items():
@@ -1143,26 +1183,33 @@ class QPostViewer:
         today = datetime.datetime.now(); self._search_by_month_day(today.month, today.day)
     # --- END DELTA_SEARCH_LOGIC ---
 
+    # --- START USER_NOTES_METHODS ---
+    def toggle_note_edit_mode(self):
+        if self.df_displayed is None or self.df_displayed.empty or self.current_display_idx < 0:
+            return
+
+        original_df_index = str(self.df_displayed.index[self.current_display_idx]) # Use string key
+
+        current_state = self.note_text_area.cget("state")
+        if current_state == tk.DISABLED:
+            self.note_text_area.config(state=tk.NORMAL)
+            self.edit_save_note_button.config(text="Save Note")
+            self.note_text_area.focus()
+        else: # tk.NORMAL
+            note_content = self.note_text_area.get(1.0, tk.END).strip()
+            if note_content:
+                self.user_notes[original_df_index] = note_content
+            elif original_df_index in self.user_notes: # If content is empty, remove note
+                del self.user_notes[original_df_index]
+            
+            self.note_text_area.config(state=tk.DISABLED)
+            self.edit_save_note_button.config(text="Edit Note")
+            # Optionally, save immediately, or rely on on_closing
+            # utils.save_user_notes(self.user_notes, config.USER_NOTES_FILE_PATH)
+            print(f"Note for post index {original_df_index} updated.")
+    # --- END USER_NOTES_METHODS ---
+
     # --- START MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
-    def _on_mousewheel(self, event, canvas_widget):
-        # For Windows and macOS
-        if event.delta: # Windows/macOS specific
-             canvas_widget.yview_scroll(int(-1*(event.delta/120)), "units")
-        # elif event.num == 4: # Linux scroll up (alternative check if delta not present)
-        #    canvas_widget.yview_scroll(-1, "units")
-        # elif event.num == 5: # Linux scroll down
-        #    canvas_widget.yview_scroll(1, "units")
-
-    def _on_scroll_up(self, event, canvas_widget):
-        # For Linux Button-4
-        canvas_widget.yview_scroll(-1, "units")
-
-    def _on_scroll_down(self, event, canvas_widget):
-        # For Linux Button-5
-        canvas_widget.yview_scroll(1, "units")
-    # --- END MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
-
-    # --- START DOWNLOAD_WINDOW_AND_THREADING ---
     def show_download_window(self):
         if hasattr(self, 'download_win') and self.download_win is not None and self.download_win.winfo_exists():
             self.download_win.lift()
