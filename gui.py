@@ -804,6 +804,22 @@ class QPostViewer:
         close_button_frame.pack(fill=tk.X, pady=(15,0))
         ttk.Button(close_button_frame, text="Close", command=help_win.destroy).pack(pady=(0,5))
 
+        # Bind mouse wheel scrolling for the help window
+        # This ensures scrolling works when the mouse is over any of these parts.
+        widgets_to_bind_scroll = [canvas, scrollable_content_frame]
+        for child_widget in scrollable_content_frame.winfo_children(): # Bind to all direct children too
+            widgets_to_bind_scroll.append(child_widget)
+            # If children themselves have children (deeper nesting), this might need recursion,
+            # but for simple labels/buttons, direct children is usually enough.
+
+        for widget in widgets_to_bind_scroll:
+            # For Windows and macOS (MouseWheel event provides 'delta')
+            # Also catches Linux systems where MouseWheel event includes .num for button 4/5
+            widget.bind("<MouseWheel>", lambda e, cw=canvas: self._on_mousewheel(e, cw), add="+")
+            # Explicitly for Linux (Button-4 for scroll up, Button-5 for scroll down)
+            # These are separate events from <MouseWheel> on some Linux Tk versions.
+            widget.bind("<Button-4>", lambda e, cw=canvas: self._on_scroll_up(e, cw), add="+")
+            widget.bind("<Button-5>", lambda e, cw=canvas: self._on_scroll_down(e, cw), add="+")
     # --- END SHOW_HELP_WINDOW ---
 
     # --- START SHOW_ABOUT_DIALOG ---
@@ -1182,6 +1198,25 @@ class QPostViewer:
     def search_today_deltas(self):
         today = datetime.datetime.now(); self._search_by_month_day(today.month, today.day)
     # --- END DELTA_SEARCH_LOGIC ---
+
+    # --- START MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
+    def _on_mousewheel(self, event, canvas_widget):
+        # Handles <MouseWheel> events
+        if event.delta:  # Primarily for Windows/macOS (event.delta is +/-120)
+            canvas_widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        elif event.num == 4:  # For Linux if MouseWheel event itself carries Button 4
+            canvas_widget.yview_scroll(-1, "units")
+        elif event.num == 5:  # For Linux if MouseWheel event itself carries Button 5
+            canvas_widget.yview_scroll(1, "units")
+
+    def _on_scroll_up(self, event, canvas_widget):
+        # Specifically for <Button-4> on Linux
+        canvas_widget.yview_scroll(-1, "units")
+
+    def _on_scroll_down(self, event, canvas_widget):
+        # Specifically for <Button-5> on Linux
+        canvas_widget.yview_scroll(1, "units")
+    # --- END MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
 
     # --- START USER_NOTES_METHODS ---
     def toggle_note_edit_mode(self):
