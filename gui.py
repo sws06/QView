@@ -102,24 +102,21 @@ class QPostViewer:
 
         self.displayed_images_references = []
         self.current_post_urls = []
-        # self.current_post_downloaded_article_path = None # Removed
+        self.current_post_downloaded_article_path = None
 
         self.app_settings = settings.load_settings()
-        # self.effective_qffline_mode = settings.DEFAULT_SETTINGS["qffline_mode"] # Removed
 
         self.bookmarked_posts = utils.load_bookmarks_from_file(config.BOOKMARKS_FILE_PATH)
-        self.user_notes = utils.load_user_notes(config.USER_NOTES_FILE_PATH) # Load user notes
+        self.user_notes = utils.load_user_notes(config.USER_NOTES_FILE_PATH)
 
-        self.df_all_posts = app_data.load_or_parse_data()     
+        self.df_all_posts = app_data.load_or_parse_data()
+        # self.df_all_posts is checked after welcome message now
 
-        if self.df_all_posts is None or self.df_all_posts.empty:
-            messagebox.showerror("Error", "No posts loaded. Exiting.")
-            self.root.destroy(); return
-
-        self.df_all_posts = self.df_all_posts.reset_index(drop=True)
-        self.df_displayed = self.df_all_posts.copy()
-        self.current_search_active = False
+        # Initialize df_displayed and current_display_idx, might be updated after welcome
+        self.df_displayed = pd.DataFrame()
         self.current_display_idx = -1
+        self.current_search_active = False
+
 
         self.current_theme = self.app_settings.get("theme", settings.DEFAULT_SETTINGS["theme"])
         self.placeholder_fg_color_dark = "grey"
@@ -128,7 +125,6 @@ class QPostViewer:
         self.link_label_fg_light = "#0056b3"
 
         self.style = ttk.Style()
-        # self.skif_mode_label = ttk.Label(self.root, text="", style="Skif.TLabel", anchor="center") # Removed
 
         self.tree_frame = ttk.Frame(root)
         self.tree_frame.grid(row=0, column=0, padx=10, pady=(10,0), sticky="nswe")
@@ -138,8 +134,9 @@ class QPostViewer:
         self.details_outer_frame = ttk.Frame(root)
         self.details_outer_frame.grid(row=0, column=1, padx=(0,10), pady=(10,0), sticky="nswe")
         root.grid_columnconfigure(1, weight=3)
-        self.details_outer_frame.grid_rowconfigure(0, weight=2)
-        self.details_outer_frame.grid_rowconfigure(1, weight=1)
+        self.details_outer_frame.grid_rowconfigure(0, weight=2) # Post text area
+        self.details_outer_frame.grid_rowconfigure(1, weight=1) # Image display
+        self.details_outer_frame.grid_rowconfigure(2, weight=1) # Notes section
         self.details_outer_frame.grid_columnconfigure(0, weight=1)
 
         self.post_tree = ttk.Treeview(self.tree_frame, columns=("Post #", "Date", "Bookmarked"), show="headings")
@@ -177,7 +174,7 @@ class QPostViewer:
         # --- Notes Frame ---
         self.notes_frame = ttk.Labelframe(self.details_outer_frame, text="User Note", padding=(10,5))
         self.notes_frame.grid(row=2, column=0, sticky="nswe", pady=(5,0))
-        self.details_outer_frame.grid_rowconfigure(2, weight=1) # Give notes section some weight
+        # self.details_outer_frame.grid_rowconfigure(2, weight=1) # Already set above
 
         self.notes_frame.grid_columnconfigure(0, weight=1)
         self.notes_frame.grid_rowconfigure(0, weight=1)
@@ -251,9 +248,6 @@ class QPostViewer:
         self.view_article_button = ttk.Button(buttons_frame2, text="Article Not Saved", command=lambda: None, state=tk.DISABLED)
         self.view_article_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
 
-        # self.view_article_button = ttk.Button(buttons_frame2, text="View Article", command=lambda: None, state=tk.DISABLED) # Removed
-        # self.view_article_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X) # Removed
-
         buttons_frame3 = ttk.Frame(actions_frame)
         buttons_frame3.pack(fill=tk.X, pady=2)
         self.bookmark_button = ttk.Button(buttons_frame3, text="Bookmark This Post", command=self.toggle_current_post_bookmark)
@@ -261,13 +255,6 @@ class QPostViewer:
         self.bookmark_button.config(state=tk.DISABLED)
         self.view_bookmarks_button = ttk.Button(buttons_frame3, text=f"View Bookmarks ({len(self.bookmarked_posts)})", command=self.view_bookmarked_gui_posts)
         self.view_bookmarks_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
-
-        # download_control_frame = ttk.Frame(actions_frame) # Removed
-        # download_control_frame.pack(fill=tk.X, pady=(5,2)) # Removed
-        # self.download_articles_button = ttk.Button(download_control_frame, text="Sync Offline Content", command=self.show_settings_window) # Removed
-        # self.download_articles_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X) # Removed
-        # self.download_status_label = ttk.Label(download_control_frame, text="", width=30, anchor="e") # Removed
-        # self.download_status_label.pack(side=tk.RIGHT, padx=2, fill=tk.X) # Removed
 
         bottom_buttons_frame = ttk.Frame(controls_main_frame)
         bottom_buttons_frame.pack(pady=(10,0), fill=tk.X, expand=True)
@@ -306,15 +293,23 @@ class QPostViewer:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self._init_complete = False
-        # self.determine_and_apply_effective_qffline_mode() # Removed
-        self.repopulate_treeview(self.df_displayed)
 
-        if not self.df_displayed.empty:
-            self.current_display_idx = 0
-            self.select_tree_item_by_idx(self.current_display_idx)
-        else:
-            self.update_display()
+        # Initial data loading and tree population
+        if self.df_all_posts is not None and not self.df_all_posts.empty:
+            self.df_all_posts = self.df_all_posts.reset_index(drop=True)
+            self.df_displayed = self.df_all_posts.copy()
+            # Populate the tree, but DO NOT select the first item yet to let welcome message show
+            self.repopulate_treeview(self.df_displayed, select_first_item=False)
+        elif self.df_all_posts is None: # Critical load failure from data.py
+            messagebox.showerror("Critical Error", "Failed to load any post data. Application cannot continue.")
+            self.root.destroy()
+            return # Stop __init__
+
+        # Show the welcome message in the text area AFTER tree might be populated
+        self.show_welcome_message()
+
         self._init_complete = True
+    # --- END __INIT__ ---
     # --- END __INIT__ ---
 
     # --- START ON_CLOSING ---
@@ -330,25 +325,15 @@ class QPostViewer:
         self.current_theme = "dark"
         self.style.theme_use('clam')
 
-        bg_color = "#2b2b2b"
-        fg_color = "#e0e0e0"
-        entry_bg = "#3c3f41"
-        button_bg = "#4f4f4f"
-        button_active_bg = "#6a6a6a"
-        tree_bg = "#3c3f41"
-        tree_sel_bg = "#0078D7"
-        tree_sel_fg = "#ffffff"
-        heading_bg = "#4f4f4f"
-        scrollbar_bg = '#4f4f4f'
-        scrollbar_trough = '#3c3f41'
-        scrollbar_arrow = '#e0e0e0'
-        # skif_label_bg = "#8B0000"; skif_label_fg = "#FFFFFF"; # Removed
+        bg_color = "#2b2b2b"; fg_color = "#e0e0e0"; entry_bg = "#3c3f41"
+        button_bg = "#4f4f4f"; button_active_bg = "#6a6a6a"; tree_bg = "#3c3f41"
+        tree_sel_bg = "#0078D7"; tree_sel_fg = "#ffffff"; heading_bg = "#4f4f4f"
+        scrollbar_bg = '#4f4f4f'; scrollbar_trough = '#3c3f41'; scrollbar_arrow = '#e0e0e0'
 
         self.root.configure(bg=bg_color)
         self.style.configure(".", background=bg_color, foreground=fg_color, font=('Arial', 10))
         self.style.configure("TFrame", background=bg_color)
         self.style.configure("TLabel", background=bg_color, foreground=fg_color, padding=3)
-        # self.style.configure("Skif.TLabel", background=skif_label_bg, foreground=skif_label_fg, font=('Arial', 9, 'bold'), padding=3) # Removed
         self.style.configure("TButton", background=button_bg, foreground=fg_color, padding=5, font=('Arial', 9, 'bold'), borderwidth=1, relief=tk.RAISED)
         self.style.map("TButton", background=[("active", button_active_bg), ("pressed", "#5a5a5a")], relief=[("pressed", tk.SUNKEN)])
         self.style.configure("Treeview", background=tree_bg, foreground=fg_color, fieldbackground=tree_bg, borderwidth=1, relief=tk.FLAT)
@@ -363,6 +348,7 @@ class QPostViewer:
         self.style.map("TCombobox", fieldbackground=[("readonly", entry_bg)], background=[("readonly", button_bg)], foreground=[("readonly", fg_color)], lightcolor=[("readonly", button_bg)], darkcolor=[("readonly", button_bg)])
 
         self.post_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
+        if hasattr(self, 'note_text_area'): self.note_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
         if hasattr(self, 'image_display_frame'): self.image_display_frame.configure(style="TFrame")
 
         self.post_text_area.tag_configure("bold_label", foreground="#a9b7c6")
@@ -375,11 +361,15 @@ class QPostViewer:
         self.post_text_area.tag_configure("bookmarked_header", foreground="#FFD700")
         self.post_text_area.tag_configure("quoted_ref_header", foreground="#ABBFD0")
         self.post_text_area.tag_configure("quoted_ref_text_body", foreground="#cccccc")
+        self.post_text_area.tag_configure("welcome_title_tag", foreground="#FFCB6B")
+        self.post_text_area.tag_configure("welcome_text_tag", foreground="#e0e0e0")
+        self.post_text_area.tag_configure("welcome_emphasis_tag", foreground="#A5C25C")
+        self.post_text_area.tag_configure("welcome_closing_tag", foreground="#FFD700")
+
 
         if hasattr(self, 'theme_toggle_button'): self.theme_toggle_button.config(text="Dark to Light")
         if hasattr(self, 'post_entry') and self.post_entry.winfo_exists(): self.restore_placeholder(None, config.PLACEHOLDER_POST_NUM, self.post_entry)
         if hasattr(self, 'keyword_entry') and self.keyword_entry.winfo_exists(): self.restore_placeholder(None, config.PLACEHOLDER_KEYWORD, self.keyword_entry)
-        # if hasattr(self, 'skif_mode_label'): self.skif_mode_label.configure(style="Skif.TLabel") # Removed
     # --- END APPLY_DARK_THEME ---
 
     # --- START APPLY_LIGHT_THEME ---
@@ -387,13 +377,11 @@ class QPostViewer:
         self.current_theme = "light"
         self.style.theme_use('clam')
         bg_color = "#f0f0f0"; fg_color = "#000000"; entry_bg = "#ffffff"; button_bg = "#e1e1e1"; button_active_bg = "#d1d1d1"; tree_bg = "#ffffff"; tree_sel_bg = "#0078D7"; tree_sel_fg = "#ffffff"; heading_bg = "#e1e1e1"; scrollbar_bg = '#c1c1c1'; scrollbar_trough = '#e1e1e1'; scrollbar_arrow = '#000000'
-        # skif_label_bg = "#FFDDDD"; skif_label_fg = "#8B0000"; # Removed
 
         self.root.configure(bg=bg_color)
         self.style.configure(".", background=bg_color, foreground=fg_color, font=('Arial', 10))
         self.style.configure("TFrame", background=bg_color)
         self.style.configure("TLabel", background=bg_color, foreground=fg_color, padding=3)
-        # self.style.configure("Skif.TLabel", background=skif_label_bg, foreground=skif_label_fg, font=('Arial', 9, 'bold'), padding=3) # Removed
         self.style.configure("TButton", background=button_bg, foreground=fg_color, padding=5, font=('Arial', 9, 'bold'), borderwidth=1, relief=tk.RAISED)
         self.style.map("TButton", background=[("active", button_active_bg), ("pressed", "#c1c1c1")], relief=[("pressed", tk.SUNKEN)])
         self.style.configure("Treeview", background=tree_bg, foreground=fg_color, fieldbackground=tree_bg, borderwidth=1, relief=tk.FLAT)
@@ -407,12 +395,17 @@ class QPostViewer:
         self.style.configure("TCombobox", fieldbackground=entry_bg, background=button_bg, foreground=fg_color, arrowcolor=fg_color, selectbackground=entry_bg, selectforeground=fg_color)
         self.style.map("TCombobox", fieldbackground=[("readonly", entry_bg)], background=[("readonly", button_bg)], foreground=[("readonly", fg_color)], lightcolor=[("readonly", button_bg)], darkcolor=[("readonly", button_bg)])
         self.post_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
+        if hasattr(self, 'note_text_area'): self.note_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
         if hasattr(self, 'image_display_frame'): self.image_display_frame.configure(style="TFrame")
         self.post_text_area.tag_configure("bold_label", foreground="#333333"); self.post_text_area.tag_configure("post_number_val", foreground="#D9534F"); self.post_text_area.tag_configure("date_val", foreground="#5CB85C"); self.post_text_area.tag_configure("author_val", foreground="#555555"); self.post_text_area.tag_configure("themes_val", foreground="#8E44AD"); self.post_text_area.tag_configure("image_val", foreground="#337AB7"); self.post_text_area.tag_configure("clickable_link_style", foreground=self.link_label_fg_light); self.post_text_area.tag_configure("bookmarked_header", foreground="#F0AD4E"); self.post_text_area.tag_configure("quoted_ref_header", foreground="#4A4A4A"); self.post_text_area.tag_configure("quoted_ref_text_body", foreground="#202020")
+        self.post_text_area.tag_configure("welcome_title_tag", foreground="#D9534F")
+        self.post_text_area.tag_configure("welcome_text_tag", foreground="#000000")
+        self.post_text_area.tag_configure("welcome_emphasis_tag", foreground="#8E44AD")
+        self.post_text_area.tag_configure("welcome_closing_tag", foreground="#5CB85C")
+
         if hasattr(self, 'theme_toggle_button'): self.theme_toggle_button.config(text="Into the Dark")
         if hasattr(self, 'post_entry') and self.post_entry.winfo_exists(): self.restore_placeholder(None, config.PLACEHOLDER_POST_NUM, self.post_entry)
         if hasattr(self, 'keyword_entry') and self.keyword_entry.winfo_exists(): self.restore_placeholder(None, config.PLACEHOLDER_KEYWORD, self.keyword_entry)
-        # if hasattr(self, 'skif_mode_label'): self.skif_mode_label.configure(style="Skif.TLabel") # Removed
     # --- END APPLY_LIGHT_THEME ---
 
     # --- START TOGGLE_THEME ---
@@ -421,7 +414,11 @@ class QPostViewer:
             self.apply_light_theme()
         else:
             self.apply_dark_theme()
-        if self.current_display_idx != -1 : self.update_display() # Refresh display only if a post is shown
+        # Refresh display (either current post or welcome message) to apply new theme styles to text area
+        if self.current_display_idx != -1 and not (self.df_displayed is None or self.df_displayed.empty):
+             self.update_display()
+        else:
+             self.show_welcome_message()
     # --- END TOGGLE_THEME ---
     # === END::THEME_TOGGLE ===
 
@@ -445,28 +442,35 @@ class QPostViewer:
         self.post_text_area.tag_configure("bookmarked_header", font=(default_font_name, 11, "bold"))
         self.post_text_area.tag_configure("quoted_ref_header", font=(default_font_name, 10, "italic", "bold"), lmargin1=20, lmargin2=20, spacing1=5)
         self.post_text_area.tag_configure("quoted_ref_text_body", font=(default_font_name, 10, "italic"), lmargin1=25, lmargin2=25, spacing3=5)
+
+        # Tags for Welcome Message
+        self.post_text_area.tag_configure("welcome_title_tag", font=(default_font_name, 14, "bold"), justify=tk.CENTER, spacing1=5, spacing3=10)
+        self.post_text_area.tag_configure("welcome_text_tag", font=(default_font_name, 10), lmargin1=15, lmargin2=15, spacing1=3, spacing3=3, wrap=tk.WORD)
+        self.post_text_area.tag_configure("welcome_emphasis_tag", font=(default_font_name, 10, "italic"))
+        self.post_text_area.tag_configure("welcome_closing_tag", font=(default_font_name, 10, "bold"), justify=tk.CENTER, spacing1=10)
     # --- END CONFIGURE_TEXT_TAGS ---
 
     # --- START _PREVENT_TEXT_EDIT ---
     def _prevent_text_edit(self, event):
-        if event.state & 0x0004 and event.keysym.lower() == 'c':
+        if event.state & 0x0004 and event.keysym.lower() == 'c': # Allow Ctrl+C
             return
+        # Allow specific navigation and selection keys
         allowed_nav_keys = ["Left", "Right", "Up", "Down", "Prior", "Next", "Home", "End",
-                            "Control_L", "Control_R", "Shift_L", "Shift_R", "Alt_L", "Alt_R"]
-        if event.keysym in allowed_nav_keys:
+                            "Control_L", "Control_R", "Shift_L", "Shift_R", "Alt_L", "Alt_R",
+                            "leftarrow", "rightarrow", "uparrow", "downarrow", "PageUp", "PageDown"] # adding keysyms
+        if event.keysym in allowed_nav_keys or event.keysym.lower() in ["a"] and event.state & 0x0004: # Allow Ctrl+A
             return
-        return "break"
+        return "break" # Prevent modification
     # --- END _PREVENT_TEXT_EDIT ---
 
     # --- START _INSERT_TEXT_WITH_CLICKABLE_URLS ---
-    def _insert_text_with_clickable_urls(self, text_content_raw, base_tags_tuple, main_post_original_df_index, link_event_tag_prefix): # Removed skif_mode_active
+    def _insert_text_with_clickable_urls(self, text_content_raw, base_tags_tuple, main_post_original_df_index, link_event_tag_prefix):
         text_content = utils.sanitize_text_for_tkinter(text_content_raw)
 
         if not isinstance(text_content, str) or not text_content.strip():
             self.post_text_area.insert(tk.END, str(text_content) if pd.notna(text_content) else "", base_tags_tuple if base_tags_tuple else ())
             return
 
-        # Extract URLs first to populate self.current_post_urls (unconditionally)
         urls_in_segment_all = utils._extract_urls_from_text(text_content)
         for url in urls_in_segment_all:
             if url not in self.current_post_urls:
@@ -479,26 +483,11 @@ class QPostViewer:
                 self.post_text_area.insert(tk.END, text_content[last_end:start], base_tags_tuple if base_tags_tuple else ())
 
             url = url_match.group(0)
-
-            make_clickable = True # Always make clickable now
-
-            if make_clickable:
-                clickable_tag_instance = f"{link_event_tag_prefix}_url_{url_match.start()}" # Simpler unique tag
-
-                current_tags = list(base_tags_tuple) if base_tags_tuple else []
-                current_tags.append('clickable_link_style')
-                current_tags.append(clickable_tag_instance)
-
-                self.post_text_area.insert(tk.END, url, tuple(current_tags))
-
-                # THIS IS THE CORRECTED PART:
-                def url_click_factory(clicked_url=url):
-                    return lambda e: utils.open_link_with_preference(clicked_url, self.app_settings)
-                self.post_text_area.tag_bind(clickable_tag_instance, "<Button-1>", url_click_factory(url))
-            else:
-                # Render as plain text (This path should not be taken now)
-                self.post_text_area.insert(tk.END, url, base_tags_tuple if base_tags_tuple else ())
-
+            clickable_tag_instance = f"{link_event_tag_prefix}_url_{url_match.start()}"
+            current_tags = list(base_tags_tuple) if base_tags_tuple else []
+            current_tags.extend(['clickable_link_style', clickable_tag_instance])
+            self.post_text_area.insert(tk.END, url, tuple(current_tags))
+            self.post_text_area.tag_bind(clickable_tag_instance, "<Button-1>", lambda e, u=url: utils.open_link_with_preference(u, self.app_settings))
             last_end = end
 
         if last_end < len(text_content):
@@ -511,17 +500,10 @@ class QPostViewer:
         self.displayed_images_references = []; self.current_post_urls = []; self.current_post_downloaded_article_path = None
         self.post_text_area.config(state=tk.NORMAL); self.post_text_area.delete(1.0, tk.END)
 
-        show_images = True # Always try to show images
+        show_images = True
 
         if self.df_displayed is None or self.df_displayed.empty or not (0 <= self.current_display_idx < len(self.df_displayed)):
-            self.post_text_area.insert(tk.END, "No post selected."); self.post_text_area.config(state=tk.DISABLED)
-            if hasattr(self, 'show_links_button'): self.show_links_button.config(state=tk.DISABLED)
-            if hasattr(self, 'view_article_button'): self.view_article_button.config(text="Article Not Saved", state=tk.DISABLED, command=lambda: None)
-            self.update_post_number_label(); self.update_bookmark_button_status()
-            # Clear and disable notes area if no post selected
-            self.note_text_area.config(state=tk.NORMAL); self.note_text_area.delete(1.0, tk.END)
-            self.note_text_area.config(state=tk.DISABLED)
-            self.edit_save_note_button.config(text="Edit Note", state=tk.DISABLED)
+            self.show_welcome_message()
             return
 
         original_df_index = self.df_displayed.index[self.current_display_idx]
@@ -555,7 +537,7 @@ class QPostViewer:
                 if ref_author_id and str(ref_author_id).strip(): header_parts.append(f"(by {ref_author_id})")
                 header_parts.append(":\n"); self.post_text_area.insert(tk.END, utils.sanitize_text_for_tkinter("".join(header_parts)), ("quoted_ref_header")); self._insert_text_with_clickable_urls(ref_text_content_raw, ("quoted_ref_text_body",), original_df_index, f"qref_{original_df_index}_{ref_idx}"); self.post_text_area.insert(tk.END, "\n")
             self.post_text_area.insert(tk.END, "\n")
-        main_text_content_raw = post.get('Text', ''); # Get text content early for article scan
+        main_text_content_raw = post.get('Text', '');
         self.post_text_area.insert(tk.END, utils.sanitize_text_for_tkinter("Post Text:\n"), ("bold_label"));
         self._insert_text_with_clickable_urls(main_text_content_raw, (), original_df_index, f"main_{original_df_index}")
 
@@ -566,7 +548,7 @@ class QPostViewer:
                 for img_data in images_json_data:
                     img_filename = img_data.get('file')
                     if img_filename:
-                        local_image_path = os.path.join(config.IMAGE_DIR, utils.sanitize_filename_component(os.path.basename(img_filename))) # Use sanitized name
+                        local_image_path = os.path.join(config.IMAGE_DIR, utils.sanitize_filename_component(os.path.basename(img_filename)))
                         if os.path.exists(local_image_path):
                             try:
                                 img_pil = Image.open(local_image_path); img_pil.thumbnail((300, 300)); photo = ImageTk.PhotoImage(img_pil)
@@ -584,7 +566,6 @@ class QPostViewer:
             self.post_text_area.insert(tk.END, utils.sanitize_text_for_tkinter("\nSource Link: "), "bold_label"); self._insert_text_with_clickable_urls(actual_metadata_link_str, ("clickable_link_style",) , original_df_index, f"metalink_{original_df_index}"); self.post_text_area.insert(tk.END, "\n")
         elif post.get('Site') and post.get('Board'): site_text = utils.sanitize_text_for_tkinter(post.get('Site','')); board_text = utils.sanitize_text_for_tkinter(post.get('Board','')); self.post_text_area.insert(tk.END, utils.sanitize_text_for_tkinter("\nSource: "), "bold_label"); self.post_text_area.insert(tk.END, f"{site_text}/{board_text}\n", "author_val")
 
-        # --- Check for saved articles ---
         article_found_path = None
         urls_to_scan_for_articles = []
         if metadata_link_raw and isinstance(metadata_link_raw, str) and metadata_link_raw.strip(): urls_to_scan_for_articles.append(metadata_link_raw.strip())
@@ -595,7 +576,7 @@ class QPostViewer:
             if not url or not isinstance(url, str) or not url.startswith(('http://', 'https://')): continue
             if utils.is_excluded_domain(url, config.EXCLUDED_LINK_DOMAINS): continue
             exists, filepath = utils.check_article_exists_util(safe_filename_post_id, url)
-            if exists: article_found_path = filepath; break # Use the first one found
+            if exists: article_found_path = filepath; break
 
         if hasattr(self, 'view_article_button'):
             if article_found_path:
@@ -606,286 +587,70 @@ class QPostViewer:
         if hasattr(self, 'show_links_button'):
             if self.current_post_urls: self.show_links_button.config(state=tk.NORMAL)
             else: self.show_links_button.config(state=tk.DISABLED)
-        
-        # --- Update User Note Area ---
-        self.note_text_area.config(state=tk.NORMAL)
-        self.note_text_area.delete(1.0, tk.END)
-        # Use string representation of original_df_index for dictionary keys
-        current_note = self.user_notes.get(str(original_df_index), "")
-        if current_note:
-            self.note_text_area.insert(tk.END, current_note)
-        self.note_text_area.config(state=tk.DISABLED)
-        self.edit_save_note_button.config(text="Edit Note", state=tk.NORMAL)
-        # --- End Update User Note Area ---
+
+        if hasattr(self, 'edit_save_note_button'): self.edit_save_note_button.config(state=tk.NORMAL)
+        if hasattr(self, 'note_text_area'):
+            current_note = self.user_notes.get(str(original_df_index), "")
+            self.note_text_area.config(state=tk.NORMAL)
+            self.note_text_area.delete(1.0, tk.END)
+            if current_note: self.note_text_area.insert(tk.END, current_note)
+            self.note_text_area.config(state=tk.DISABLED)
+            if hasattr(self, 'edit_save_note_button'): self.edit_save_note_button.config(text="Edit Note")
+
 
         self.post_text_area.config(state=tk.DISABLED); self.update_post_number_label(); self.update_bookmark_button_status()
     # --- END UPDATE_DISPLAY ---
 
-    # --- START SHOW_SETTINGS_WINDOW ---
-    def show_settings_window(self):
-        if hasattr(self, 'settings_win') and self.settings_win is not None and self.settings_win.winfo_exists():
-            self.settings_win.lift()
-            self.settings_win.focus_set()
-            return
+    # --- START SHOW_WELCOME_MESSAGE ---
+    def show_welcome_message(self):
+        self.post_text_area.config(state=tk.NORMAL)
+        self.post_text_area.delete(1.0, tk.END)
 
-        self.settings_win = tk.Toplevel(self.root)
-        self.settings_win.title("QView Settings")
+        for widget in self.image_display_frame.winfo_children(): widget.destroy()
+        self.displayed_images_references = []
+        self.current_post_urls = []
 
-        try:
-            dialog_bg = self.style.lookup("TFrame", "background")
-        except tk.TclError:
-            dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
-        self.settings_win.configure(bg=dialog_bg)
+        title = "QView – Offline Q Post Explorer\n"
+        para1 = "QView is a standalone desktop application designed for serious research into the full Q post archive. Built from the ground up for speed, clarity, and privacy, QView lets you search, explore, and annotate thousands of drops without needing an internet connection."
+        para2 = "Unlike web-based tools that can disappear or go dark, QView gives you complete control—local images, saved article archives, powerful search tools, and customizable settings wrapped in a clean, user-friendly interface. No tracking. No fluff. Just signal."
+        para3 = "Development is 100% community-driven and fully open-source."
+        para4 = "If you’ve found QView useful in your research or decoding work, consider buying me a coffee. It helps keep the project alive and evolving."
+        donation_text_display = "Buy me a coffee ☕"
+        donation_url = "https://www.buymeacoffee.com/qview1776"
+        feedback_text = "Feedback & Suggestions: qview1776@gmail.com"
+        closing_text = "🔒 No paywalls. No locked features. Just a tip jar for the digital battlefield."
 
-        self.settings_win.geometry("400x255") # Increased height
-        self.settings_win.transient(self.root)
-        self.settings_win.grab_set()
-        self.settings_win.resizable(False, False)
-        self.settings_win.protocol("WM_DELETE_WINDOW", self.on_settings_window_close)
+        self.post_text_area.insert(tk.END, title + "\n", "welcome_title_tag")
+        self.post_text_area.insert(tk.END, para1 + "\n\n", "welcome_text_tag")
+        self.post_text_area.insert(tk.END, para2 + "\n\n", "welcome_text_tag")
+        self.post_text_area.insert(tk.END, para3 + "\n\n", ("welcome_text_tag", "welcome_emphasis_tag"))
+        self.post_text_area.insert(tk.END, para4 + " ", "welcome_text_tag")
 
-        main_frame = ttk.Frame(self.settings_win, padding="10")
-        main_frame.pack(expand=True, fill="both")
+        clickable_donation_tag_welcome = "welcome_donation_link_main"
+        self.post_text_area.insert(tk.END, donation_text_display, ("welcome_text_tag", "clickable_link_style", clickable_donation_tag_welcome))
+        self.post_text_area.tag_bind(clickable_donation_tag_welcome, "<Button-1>", lambda e, url=donation_url: utils.open_link_with_preference(url, self.app_settings))
+        self.post_text_area.insert(tk.END, "\n\n", "welcome_text_tag")
 
-        # --- Theme Setting ---
-        theme_frame = ttk.Labelframe(main_frame, text="Display Theme", padding="10")
-        theme_frame.pack(fill="x", pady=5)
-        self.settings_theme_var = tk.StringVar(value=self.app_settings.get("theme", settings.DEFAULT_SETTINGS["theme"]))
-        dark_rb_theme = ttk.Radiobutton(theme_frame, text="Dark", variable=self.settings_theme_var, value="dark", command=self.on_setting_change)
-        dark_rb_theme.pack(side="left", padx=5, expand=True)
-        light_rb_theme = ttk.Radiobutton(theme_frame, text="Light", variable=self.settings_theme_var, value="light", command=self.on_setting_change)
-        light_rb_theme.pack(side="left", padx=5, expand=True)
+        self.post_text_area.insert(tk.END, feedback_text + "\n\n", "welcome_text_tag")
+        self.post_text_area.insert(tk.END, closing_text + "\n", "welcome_closing_tag")
 
-        # --- Link Opening Preference ---
-        link_pref_frame = ttk.Labelframe(main_frame, text="Link Opening Preference", padding="10")
-        link_pref_frame.pack(fill="x", pady=5)
-        self.settings_link_pref_var = tk.StringVar(value=self.app_settings.get("link_opening_preference", settings.DEFAULT_SETTINGS["link_opening_preference"]))
+        self.post_text_area.config(state=tk.DISABLED)
 
-        rb_default = ttk.Radiobutton(link_pref_frame, text="System Default Browser", variable=self.settings_link_pref_var, value="default", command=self.on_setting_change)
-        rb_default.pack(anchor="w", padx=5)
-        rb_chrome_incognito = ttk.Radiobutton(link_pref_frame, text="Google Chrome (Incognito, if available)", variable=self.settings_link_pref_var, value="chrome_incognito", command=self.on_setting_change)
-        rb_chrome_incognito.pack(anchor="w", padx=5)
-
-
-        # --- Close Button ---
-        close_button_frame = ttk.Frame(main_frame)
-        close_button_frame.pack(side="bottom", fill="x", pady=(10,0))
-        ttk.Button(close_button_frame, text="Close", command=self.on_settings_window_close).pack(pady=5)
-    # --- END SHOW_SETTINGS_WINDOW ---
-
-    # --- START ON_SETTING_CHANGE ---
-    def on_setting_change(self, event=None):
-        # Theme
-        new_theme = self.settings_theme_var.get()
-        theme_changed = False
-        if self.app_settings.get("theme") != new_theme:
-            self.app_settings["theme"] = new_theme
-            self.current_theme = new_theme
-            theme_changed = True
-            if new_theme == "dark": self.apply_dark_theme()
-            else: self.apply_light_theme()
-
-            if hasattr(self, 'theme_toggle_button'):
-                self.theme_toggle_button.config(text="Into the Dark" if new_theme == "light" else "Dark to Light")
-
-            if hasattr(self, 'settings_win') and self.settings_win and self.settings_win.winfo_exists():
-                try: self.settings_win.configure(bg=self.style.lookup("TFrame", "background"))
-                except tk.TclError: pass
-
-        # Link Opening Preference
-        new_link_pref = self.settings_link_pref_var.get()
-        link_pref_changed = False
-        if self.app_settings.get("link_opening_preference") != new_link_pref:
-            self.app_settings["link_opening_preference"] = new_link_pref
-            link_pref_changed = True
-
-        if theme_changed or link_pref_changed:
-            settings.save_settings(self.app_settings)
-            print(f"Settings saved: Theme='{self.app_settings.get('theme')}', Link Pref='{self.app_settings.get('link_opening_preference')}'")
-            if theme_changed and self.current_display_idx != -1:
-                 self.update_display() # Update display only if theme changed and a post is shown
-    # --- END ON_SETTING_CHANGE ---
-
-    # --- START ON_SETTINGS_WINDOW_CLOSE ---
-    def on_settings_window_close(self):
-        if hasattr(self, 'settings_win') and self.settings_win:
-            self.settings_win.destroy()
-            self.settings_win = None
-    # --- END ON_SETTINGS_WINDOW_CLOSE ---
-
-    # --- START SHOW_HELP_WINDOW ---
-    def show_help_window(self):
-        import webbrowser
-
-        try:
-            dialog_bg = self.style.lookup("TFrame", "background")
-            bold_font = ('Arial', 12, 'bold', 'underline')
-            normal_font = ('Arial', 10)
-            link_fg = self.link_label_fg_dark if self.current_theme == "dark" else self.link_label_fg_light
-        except tk.TclError: # Fallback if style lookup fails
-            dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
-            bold_font = ('Arial', 12, 'bold', 'underline')
-            normal_font = ('Arial', 10)
-            link_fg = "#6DAEFF" if self.current_theme == "dark" else "#0056b3"
-
-        help_win = tk.Toplevel(self.root)
-        help_win.title("QView - Help/Tips")
-        help_win.configure(bg=dialog_bg)
-        help_win.geometry("550x450") # Adjusted height
-        help_win.transient(self.root)
-        help_win.grab_set()
-
-        main_help_frame = ttk.Frame(help_win, padding="15", style="TFrame")
-        main_help_frame.pack(expand=True, fill="both")
-
-        canvas = tk.Canvas(main_help_frame, bg=dialog_bg, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(main_help_frame, orient="vertical", command=canvas.yview)
-        scrollable_content_frame = ttk.Frame(canvas, style="TFrame")
-
-        scrollable_content_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(
-                scrollregion=canvas.bbox("all")
-            )
-        )
-
-        canvas.create_window((0, 0), window=scrollable_content_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        ttk.Label(scrollable_content_frame, text="Help & Tips", font=bold_font).pack(pady=(0, 10), anchor='w')
-        tips = [
-            "- Use the Treeview (left) to navigate posts.",
-            "- Click Treeview headers to sort (Post # & Date).",
-            "- Use 'Post #' entry to jump directly (e.g., 123, 10-15, 1,5,10).",
-            "- 'Keyword/Theme' searches post text and assigned themes.",
-            "- 'Search by Date' uses a calendar for specific day lookups.",
-            "- 'Delta Search' finds posts on the same Month/Day across all years.",
-            "- 'Today's Deltas' shows posts from this M/D (hover for date).",
-            "- Bookmark posts and view them with 'View Bookmarks'.",
-            "- Export the current list to HTML or CSV.",
-            "- Toggle 'Dark to Light' / 'Into the Dark' for theme.",
-            "- Links in post text and 'Show Links' window are clickable.",
-            "- Use 'Settings' to change the application theme." # Updated Tip
-        ]
-        for tip in tips:
-            ttk.Label(scrollable_content_frame, text=tip, wraplength=480, justify=tk.LEFT, font=normal_font).pack(anchor='w', padx=5, pady=1)
-
-        ttk.Label(scrollable_content_frame, text="Resources", font=bold_font).pack(pady=(20, 10), anchor='w')
-
-        resources = {
-            "QAnon.pub": "https://qanon.pub/",
-            # "Q Posts Online (qposts.online)": "https://qposts.online/", # Removed
-            "Q Agg (qagg.news)": "https://qagg.news/",
-            "Gematrix.org": "https://www.gematrix.org/" # Added Gematrix
-        }
-
-        for text, url in resources.items():
-            label = ttk.Label(scrollable_content_frame, text=text, cursor="hand2", style="TLabel")
-            label.configure(font=(normal_font[0], normal_font[1], "underline"), foreground=link_fg)
-            label.pack(anchor='w', padx=5, pady=2)
-            label.bind("<Button-1>", lambda e, link=url: utils.open_link_with_preference(link, self.app_settings))
-        # Bind mouse wheel scrolling for the help window
-        # It's important to bind to the canvas, the scrollable frame, AND its direct children (labels)
-        # to ensure scrolling works when the mouse is over any of these parts.
-        widgets_to_bind_scroll = [canvas, scrollable_content_frame]
-        # Add direct children of scrollable_content_frame (Labels, etc.)
-        for child in scrollable_content_frame.winfo_children():
-            widgets_to_bind_scroll.append(child)
-
-        for widget in widgets_to_bind_scroll:
-            # For Windows and macOS (MouseWheel event provides 'delta')
-            widget.bind("<MouseWheel>", lambda e, cw=canvas: self._on_mousewheel(e, cw), add="+")
-            # For Linux (Button-4 for scroll up, Button-5 for scroll down)
-            widget.bind("<Button-4>", lambda e, cw=canvas: self._on_scroll_up(e, cw), add="+")
-            widget.bind("<Button-5>", lambda e, cw=canvas: self._on_scroll_down(e, cw), add="+")
-        close_button_frame = ttk.Frame(main_help_frame, style="TFrame")
-        close_button_frame.pack(fill=tk.X, pady=(15,0))
-        ttk.Button(close_button_frame, text="Close", command=help_win.destroy).pack(pady=(0,5))
-
-        # Bind mouse wheel scrolling for the help window
-        # This ensures scrolling works when the mouse is over any of these parts.
-        widgets_to_bind_scroll = [canvas, scrollable_content_frame]
-        for child_widget in scrollable_content_frame.winfo_children(): # Bind to all direct children too
-            widgets_to_bind_scroll.append(child_widget)
-            # If children themselves have children (deeper nesting), this might need recursion,
-            # but for simple labels/buttons, direct children is usually enough.
-
-        for widget in widgets_to_bind_scroll:
-            # For Windows and macOS (MouseWheel event provides 'delta')
-            # Also catches Linux systems where MouseWheel event includes .num for button 4/5
-            widget.bind("<MouseWheel>", lambda e, cw=canvas: self._on_mousewheel(e, cw), add="+")
-            # Explicitly for Linux (Button-4 for scroll up, Button-5 for scroll down)
-            # These are separate events from <MouseWheel> on some Linux Tk versions.
-            widget.bind("<Button-4>", lambda e, cw=canvas: self._on_scroll_up(e, cw), add="+")
-            widget.bind("<Button-5>", lambda e, cw=canvas: self._on_scroll_down(e, cw), add="+")
-    # --- END SHOW_HELP_WINDOW ---
-
-    # --- START SHOW_ABOUT_DIALOG ---
-    def show_about_dialog(self):
-        messagebox.showinfo("About QView",
-                            "QView - Post Viewer\n\n"
-                            "Version: 0.7.0 (Cleaned)\n"
-                            "Developed for exploring Q posts data.\n\n"
-                            "Happy digging!",
-                            parent=self.root)
-    # --- END SHOW_ABOUT_DIALOG ---
-
-    # --- START SHOW_POST_LINKS_WINDOW_EXTERNAL ---
-    def show_post_links_window_external(self):
-        if not self.current_post_urls:
-            messagebox.showinfo("Links", "No URLs found in the current post.", parent=self.root)
-            return
-
-        display_urls = self.current_post_urls # No more filtering
-
-        try:
-            popup_bg = self.style.lookup("TFrame", "background")
-            canvas_bg = self.style.lookup("Treeview", "fieldbackground")
-            link_label_fg = self.link_label_fg_dark if self.current_theme == "dark" else self.link_label_fg_light
-        except tk.TclError:
-            popup_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
-            canvas_bg = "#3c3f41" if self.current_theme == "dark" else "#ffffff"
-            link_label_fg = self.link_label_fg_dark if self.current_theme == "dark" else self.link_label_fg_light
-
-        link_window = tk.Toplevel(self.root)
-        link_window.title("Post URLs")
-        link_window.configure(bg=popup_bg)
-        link_window.geometry("600x400")
-        link_window.transient(self.root)
-        link_window.grab_set()
-
-        canvas = tk.Canvas(link_window, bg=canvas_bg, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(link_window, orient="vertical", command=canvas.yview)
-
-        scrollable_frame = ttk.Frame(canvas, style="TFrame")
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(
-                scrollregion=canvas.bbox("all")
-            )
-        )
-        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-        scrollbar.pack(side="right", fill="y")
-
-        for url in display_urls:
-            def open_url_action_factory(u=url):
-                return lambda e: utils.open_link_with_preference(u, self.app_settings)
-            link_label.bind("<Button-1>", open_url_action_factory(url))
-
-        def frame_width(event):
-            canvas_width = event.width
-            canvas.itemconfig(canvas_window, width = canvas_width)
-        canvas.bind("<Configure>", frame_width)
-    # --- END SHOW_POST_LINKS_WINDOW_EXTERNAL ---
+        if hasattr(self, 'show_links_button'): self.show_links_button.config(state=tk.DISABLED)
+        if hasattr(self, 'view_article_button'): self.view_article_button.config(text="Article Not Saved", state=tk.DISABLED, command=lambda: None)
+        self.update_post_number_label(is_welcome=True)
+        self.update_bookmark_button_status(is_welcome=True)
+        if hasattr(self, 'edit_save_note_button'): self.edit_save_note_button.config(state=tk.DISABLED)
+        if hasattr(self, 'note_text_area'):
+            self.note_text_area.config(state=tk.NORMAL); self.note_text_area.delete(1.0, tk.END)
+            self.note_text_area.config(state=tk.DISABLED)
+    # --- END SHOW_WELCOME_MESSAGE ---
 
     # --- START UPDATE_POST_NUMBER_LABEL ---
-    def update_post_number_label(self):
+    def update_post_number_label(self, is_welcome=False): # Added is_welcome
+        if is_welcome:
+            self.post_number_label.config(text="Welcome to QView!")
+            return
         if self.df_displayed is None or self.df_displayed.empty or self.current_display_idx < 0 : self.post_number_label.config(text="No Posts Displayed"); return
         if not (0 <= self.current_display_idx < len(self.df_displayed)): self.post_number_label.config(text="Invalid Index"); return
         post_series = self.df_displayed.iloc[self.current_display_idx]; post_num_df = post_series.get('Post Number'); original_df_idx = self.df_displayed.index[self.current_display_idx]
@@ -900,10 +665,13 @@ class QPostViewer:
             selected_iid_str = selected_items[0]
             try:
                 original_df_index = int(selected_iid_str)
-                if original_df_index in self.df_displayed.index:
+                if self.df_displayed is not None and original_df_index in self.df_displayed.index: # Check df_displayed
                     new_display_idx = self.df_displayed.index.get_loc(original_df_index)
-                    if not hasattr(self, '_init_complete') or not self._init_complete or new_display_idx != self.current_display_idx: self.current_display_idx = new_display_idx; self.update_display()
-                    elif new_display_idx == self.current_display_idx and hasattr(self, '_init_complete') and self._init_complete: self.update_display()
+                    if not hasattr(self, '_init_complete') or not self._init_complete or new_display_idx != self.current_display_idx:
+                        self.current_display_idx = new_display_idx
+                        self.update_display()
+                    elif new_display_idx == self.current_display_idx and hasattr(self, '_init_complete') and self._init_complete:
+                        self.update_display() # Refresh even if same index
             except ValueError: print(f"Error: Tree iid '{selected_iid_str}' not a valid integer for index.")
             except Exception as e: print(f"Error in on_tree_select: {e}")
     # --- END ON_TREE_SELECT ---
@@ -949,7 +717,7 @@ class QPostViewer:
 
     # --- START SELECT_TREE_ITEM_BY_IDX ---
     def select_tree_item_by_idx(self, display_idx_in_current_df):
-        if 0 <= display_idx_in_current_df < len(self.df_displayed):
+        if self.df_displayed is not None and 0 <= display_idx_in_current_df < len(self.df_displayed): # Check df_displayed
             original_df_idx_to_select = self.df_displayed.index[display_idx_in_current_df]; iid_to_select = str(original_df_idx_to_select)
             if self.post_tree.exists(iid_to_select): self.post_tree.selection_set(iid_to_select); self.post_tree.focus(iid_to_select); self.post_tree.see(iid_to_select)
         elif self.post_tree.selection(): self.post_tree.selection_remove(self.post_tree.selection())
@@ -974,62 +742,44 @@ class QPostViewer:
 
     # --- START SEARCH_POST_BY_NUMBER ---
     def search_post_by_number(self):
-        entry_widget = self.post_entry
-        placeholder = config.PLACEHOLDER_POST_NUM
-        search_input = entry_widget.get()
-
-        if search_input == placeholder or not search_input.strip():
-            messagebox.showwarning("Input", "Please enter a post number, range (e.g., 10-15), or list (e.g., 10,12,15).", parent=self.root)
-            if not search_input.strip(): self.restore_placeholder(None, placeholder, entry_widget)
-            return
-
-        target_post_numbers = []
-        search_term_str = f"Post(s) = '{search_input}'"
-        is_jump_to_single = False
-
+        entry_widget = self.post_entry; placeholder = config.PLACEHOLDER_POST_NUM; search_input = entry_widget.get()
+        if search_input == placeholder or not search_input.strip(): messagebox.showwarning("Input", "Please enter a post number, range (e.g., 10-15), or list (e.g., 10,12,15).", parent=self.root); return
+        target_post_numbers = []; search_term_str = f"Post(s) = '{search_input}'"; is_jump_to_single = False
         try:
-            if ',' in search_input:
-                target_post_numbers = [int(p.strip()) for p in search_input.split(',')]
+            if ',' in search_input: target_post_numbers = [int(p.strip()) for p in search_input.split(',')]
             elif '-' in search_input:
-                parts = search_input.split('-')
-                if len(parts) == 2:
-                    start_num_str = parts[0].strip(); end_num_str = parts[1].strip()
-                    if not start_num_str or not end_num_str: raise ValueError("Invalid range format - empty start or end.")
+                parts = search_input.split('-');
+                if len(parts) == 2: 
+                    start_num_str = parts[0].strip() # Moved to new line and indented
+                    end_num_str = parts[1].strip()   # Moved to new line and indented
+                    
+                    # This block is now correctly indented under 'if len(parts) == 2:'
+                    if not start_num_str or not end_num_str: 
+                        raise ValueError("Invalid range format - empty start or end.")
                     start_num, end_num = int(start_num_str), int(end_num_str)
-                    if start_num <= end_num: target_post_numbers = list(range(start_num, end_num + 1))
-                    else: messagebox.showerror("Input Error", "Start of range must be less than or equal to end.", parent=self.root); return
+                    if start_num <= end_num: 
+                        target_post_numbers = list(range(start_num, end_num + 1))
+                    else: 
+                        messagebox.showerror("Input Error", "Start of range must be less than or equal to end.", parent=self.root)
+                        return
                 else: raise ValueError("Invalid range format - not two parts.")
-            else:
-                target_post_numbers = [int(search_input.strip())]
-                is_jump_to_single = True
-
+            else: target_post_numbers = [int(search_input.strip())]; is_jump_to_single = True
             if not target_post_numbers: messagebox.showerror("Input Error", "No valid post numbers to search.", parent=self.root); return
-
             if is_jump_to_single:
                 post_to_find = target_post_numbers[0]
-                if self.current_search_active:
-                    self.df_displayed = self.df_all_posts.copy(); self.current_search_active = False
-                    self.clear_search_button.config(state=tk.DISABLED); self.repopulate_treeview(self.df_displayed)
-                    self.root.update_idletasks()
+                if self.current_search_active: self.df_displayed = self.df_all_posts.copy(); self.current_search_active = False; self.clear_search_button.config(state=tk.DISABLED); self.repopulate_treeview(self.df_displayed); self.root.update_idletasks()
                 matching_posts = self.df_all_posts[self.df_all_posts['Post Number'] == post_to_find]
                 if not matching_posts.empty:
                     original_df_idx = matching_posts.index[0]
-                    if original_df_idx in self.df_displayed.index:
-                         self.current_display_idx = self.df_displayed.index.get_loc(original_df_idx)
-                         self.select_tree_item_by_idx(self.current_display_idx)
+                    if self.df_displayed is not None and original_df_idx in self.df_displayed.index: self.current_display_idx = self.df_displayed.index.get_loc(original_df_idx); self.select_tree_item_by_idx(self.current_display_idx)
                     else: messagebox.showinfo("Not Found", f"Post # {post_to_find} not found (internal error).", parent=self.root)
                 else: messagebox.showinfo("Not Found", f"Post # {post_to_find} not found.", parent=self.root)
-            else:
-                results = self.df_all_posts[self.df_all_posts['Post Number'].isin(target_post_numbers)]
-                self._handle_search_results(results, search_term_str)
-        except ValueError:
-            messagebox.showerror("Input Error", "Invalid input. Please enter a number, a range (e.g., 10-15), or a comma-separated list.", parent=self.root)
+            else: results = self.df_all_posts[self.df_all_posts['Post Number'].isin(target_post_numbers)]; self._handle_search_results(results, search_term_str)
+        except ValueError: messagebox.showerror("Input Error", "Invalid input. Please enter a number, a range (e.g., 10-15), or a comma-separated list.", parent=self.root)
         finally:
             current_entry_text = entry_widget.get()
-            if current_entry_text != placeholder and current_entry_text.strip() != "":
-                entry_widget.delete(0, tk.END); self.restore_placeholder(None, placeholder, entry_widget)
-            elif not current_entry_text.strip() and current_entry_text != placeholder :
-                self.restore_placeholder(None, placeholder, entry_widget)
+            if current_entry_text != placeholder and current_entry_text.strip() != "": entry_widget.delete(0, tk.END); self.restore_placeholder(None, placeholder, entry_widget)
+            elif not current_entry_text.strip() and current_entry_text != placeholder : self.restore_placeholder(None, placeholder, entry_widget)
     # --- END SEARCH_POST_BY_NUMBER ---
 
     # --- START DATE_SEARCH_LOGIC ---
@@ -1038,7 +788,7 @@ class QPostViewer:
         except tk.TclError: dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
         top = tk.Toplevel(self.root); top.title("Select Date"); top.configure(bg=dialog_bg); top.transient(self.root); top.grab_set()
         now = datetime.datetime.now(); cal_y, cal_m, cal_d = now.year, now.month, now.day
-        if not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed):
+        if self.df_displayed is not None and not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed): # Check df_displayed
             cur_post_dt = self.df_displayed.iloc[self.current_display_idx].get('Datetime_UTC')
             if pd.notna(cur_post_dt): cal_y, cal_m, cal_d = cur_post_dt.year, cur_post_dt.month, cur_post_dt.day
         cal_fg = "#000000" if self.current_theme == "light" else "#e0e0e0"; cal_bg = "#ffffff" if self.current_theme == "light" else "#3c3f41"; cal_sel_bg = "#0078D7"; cal_sel_fg = "#ffffff"; cal_hdr_bg = "#e1e1e1" if self.current_theme == "light" else "#4a4a4a"; cal_dis_bg = "#f0f0f0" if self.current_theme == "light" else "#2b2b2b"; cal_dis_fg = "grey"
@@ -1057,10 +807,7 @@ class QPostViewer:
     # --- START KEYWORD_SEARCH_LOGIC ---
     def search_by_keyword(self):
         entry_widget = self.keyword_entry; placeholder = config.PLACEHOLDER_KEYWORD; keyword = entry_widget.get().strip()
-        if not keyword or keyword == placeholder:
-            messagebox.showwarning("Input", "Please enter a keyword or theme to search.", parent=self.root)
-            if not keyword: self.restore_placeholder(None, placeholder, entry_widget)
-            return
+        if not keyword or keyword == placeholder: messagebox.showwarning("Input", "Please enter a keyword or theme to search.", parent=self.root); return
         keyword_lower = keyword.lower()
         results = self.df_all_posts[
             (self.df_all_posts['Text'].str.lower().str.contains(keyword_lower, na=False, regex=False)) |
@@ -1074,24 +821,34 @@ class QPostViewer:
     def _handle_search_results(self, results_df, search_term_str):
         if not results_df.empty:
             self.df_displayed = results_df.copy(); self.current_search_active = True; self.clear_search_button.config(state=tk.NORMAL)
-            self.repopulate_treeview(self.df_displayed)
-            if not self.df_displayed.empty:
-                if self.current_display_idx != 0 or not self.post_tree.selection(): self.current_display_idx = 0; self.select_tree_item_by_idx(self.current_display_idx)
-                else: self.update_display()
+            self.repopulate_treeview(self.df_displayed, select_first_item=True) # Select first result
+            # update_display will be called via on_tree_select
         else:
             messagebox.showinfo("Search Results", f"No posts found for: {search_term_str}", parent=self.root)
-            self.df_displayed = pd.DataFrame(columns=self.df_all_posts.columns); self.current_search_active = True
-            self.clear_search_button.config(state=tk.NORMAL); self.repopulate_treeview(self.df_displayed); self.update_display()
+            self.df_displayed = pd.DataFrame(columns=self.df_all_posts.columns if self.df_all_posts is not None else []);
+            self.current_search_active = True; self.clear_search_button.config(state=tk.NORMAL)
+            self.repopulate_treeview(self.df_displayed, select_first_item=False) # Show empty tree
+            self.show_welcome_message() # Show welcome on no results
+    # --- END _HANDLE_SEARCH_RESULTS ---
+            self.show_welcome_message() # Show welcome on no results
     # --- END _HANDLE_SEARCH_RESULTS ---
 
     # --- START CLEAR_SEARCH_AND_SHOW_ALL ---
     def clear_search_and_show_all(self):
+        if self.df_all_posts is None or self.df_all_posts.empty:
+            self.show_welcome_message() # Already handles empty df_all_posts
+            return
+
         self.df_displayed = self.df_all_posts.copy(); self.current_search_active = False; self.clear_search_button.config(state=tk.DISABLED)
-        self.repopulate_treeview(self.df_displayed)
-        if not self.df_displayed.empty:
-            if self.current_display_idx != 0 or not self.post_tree.selection(): self.current_display_idx = 0; self.select_tree_item_by_idx(self.current_display_idx)
-            else: self.update_display()
-        else: self.update_display()
+        self.repopulate_treeview(self.df_displayed, select_first_item=True) # Select first post
+        # update_display is called via on_tree_select if selection happens
+        if self.df_displayed.empty: # Should not happen if df_all_posts is not empty
+             self.show_welcome_message()
+        # If df_displayed is not empty, repopulate_treeview with select_first_item=True should trigger update_display
+        # If no item was selected for some reason (e.g. tree is empty after repopulation), ensure correct state:
+        elif self.post_tree.selection() == (): # If nothing ended up selected
+             self.show_welcome_message()
+    # --- END CLEAR_SEARCH_AND_SHOW_ALL ---
     # --- END CLEAR_SEARCH_AND_SHOW_ALL ---
 
     # --- START EXPORT_DISPLAYED_LIST ---
@@ -1110,7 +867,7 @@ class QPostViewer:
                 if 'ImagesJSON' in df_csv.columns: df_csv['ImagesJSON'] = df_csv['ImagesJSON'].apply(lambda x: str(x) if isinstance(x, list) else "")
                 df_csv.to_csv(final_filename,index=False,encoding='utf-8-sig'); messagebox.showinfo("Success",f"Exported {len(df_for_export)} posts to {final_filename}",parent=self.root)
             elif final_filename.endswith(".html"):
-                import html # Import html locally if needed
+                import html
                 df_html = df_for_export.copy();
                 if 'Link' in df_html.columns: df_html['Link'] = df_html['Link'].apply(lambda x: f'<a href="{html.escape(x, quote=True)}" target="_blank">{html.escape(x)}</a>' if pd.notna(x) and x else "")
                 if 'Text' in df_html.columns: df_html['Text'] = df_html['Text'].apply(utils.format_cell_text_for_gui_html)
@@ -1134,36 +891,57 @@ class QPostViewer:
         if original_df_index in self.bookmarked_posts: self.bookmarked_posts.remove(original_df_index); messagebox.showinfo("Bookmark", f"Q Drop {post_id_str} unbookmarked.", parent=self.root)
         else: self.bookmarked_posts.add(original_df_index); messagebox.showinfo("Bookmark", f"Q Drop {post_id_str} bookmarked!", parent=self.root)
         self.update_bookmark_button_status(); self.update_display(); self.repopulate_treeview(self.df_displayed); self.view_bookmarks_button.config(text=f"View Bookmarks ({len(self.bookmarked_posts)})")
-    def update_bookmark_button_status(self):
-        if self.df_displayed is None or self.df_displayed.empty or self.current_display_idx < 0: self.bookmark_button.config(text="Bookmark Post", state=tk.DISABLED); return
+    def update_bookmark_button_status(self, is_welcome=False): # Added is_welcome
+        if is_welcome or self.df_displayed is None or self.df_displayed.empty or self.current_display_idx < 0:
+            self.bookmark_button.config(text="Bookmark Post", state=tk.DISABLED)
+            return
         self.bookmark_button.config(state=tk.NORMAL); original_df_index = self.df_displayed.index[self.current_display_idx]; self.bookmark_button.config(text="Unbookmark This Post" if original_df_index in self.bookmarked_posts else "Bookmark This Post")
     def view_bookmarked_gui_posts(self):
         if not self.bookmarked_posts: messagebox.showinfo("Bookmarks", "No posts bookmarked yet.", parent=self.root); return
         valid_bookmarked_indices = [idx for idx in self.bookmarked_posts if idx in self.df_all_posts.index]
-        if not valid_bookmarked_indices: messagebox.showwarning("Bookmarks", "Bookmarked posts not found in current data.", parent=self.root); self.df_displayed = pd.DataFrame(columns=self.df_all_posts.columns); self.repopulate_treeview(self.df_displayed); self.update_display(); return
+        if not valid_bookmarked_indices: messagebox.showwarning("Bookmarks", "Bookmarked posts not found in current data.", parent=self.root); self.df_displayed = pd.DataFrame(columns=self.df_all_posts.columns if self.df_all_posts is not None else []); self.repopulate_treeview(self.df_displayed); self.show_welcome_message(); return
         results_df = self.df_all_posts.loc[list(valid_bookmarked_indices)].copy();
         if 'Datetime_UTC' in results_df.columns: results_df.sort_values(by='Datetime_UTC', inplace=True)
         self._handle_search_results(results_df, "Bookmarked Posts")
     # --- END BOOKMARKING_LOGIC ---
 
     # --- START REPOPULATE_TREEVIEW ---
-    def repopulate_treeview(self, dataframe_to_show):
+    def repopulate_treeview(self, dataframe_to_show, select_first_item=True): # Added select_first_item
         self.post_tree.delete(*self.post_tree.get_children())
-        for original_df_index, row in dataframe_to_show.iterrows():
-            date_val_real = row.get('Datetime_UTC'); date_str = date_val_real.strftime('%Y-%m-%d') if pd.notna(date_val_real) else "No Date"; post_num_real = row.get('Post Number'); iid_original_index_str = str(row.name)
-            post_num_display = f"#{post_num_real}" if pd.notna(post_num_real) else f"Idx:{iid_original_index_str}"; is_bookmarked_char = "★" if row.name in self.bookmarked_posts else ""; self.post_tree.insert("", "end", iid=iid_original_index_str, values=(post_num_display, date_str, is_bookmarked_char))
-        if not dataframe_to_show.empty:
-            if not (0 <= self.current_display_idx < len(dataframe_to_show)): self.current_display_idx = 0
-            iid_to_select_original_index_str = str(dataframe_to_show.index[self.current_display_idx])
-            if self.post_tree.exists(iid_to_select_original_index_str):
-                current_selection = self.post_tree.selection()
-                if not hasattr(self, '_init_complete') or not self._init_complete or (not current_selection or current_selection[0] != iid_to_select_original_index_str): self.post_tree.selection_set(iid_to_select_original_index_str)
-                self.post_tree.focus(iid_to_select_original_index_str); self.post_tree.see(iid_to_select_original_index_str)
-        else:
+        if dataframe_to_show is not None:
+            for original_df_index, row in dataframe_to_show.iterrows():
+                date_val_real = row.get('Datetime_UTC'); date_str = date_val_real.strftime('%Y-%m-%d') if pd.notna(date_val_real) else "No Date"; post_num_real = row.get('Post Number'); iid_original_index_str = str(row.name)
+                post_num_display = f"#{post_num_real}" if pd.notna(post_num_real) else f"Idx:{iid_original_index_str}"; is_bookmarked_char = "★" if row.name in self.bookmarked_posts else ""; self.post_tree.insert("", "end", iid=iid_original_index_str, values=(post_num_display, date_str, is_bookmarked_char))
+
+        if dataframe_to_show is not None and not dataframe_to_show.empty:
+            if select_first_item:
+                idx_to_select_in_df = 0 # Default to first item
+                # If already initialized and current_display_idx is valid for new df, try to maintain it
+                if hasattr(self, '_init_complete') and self._init_complete and \
+                   0 <= self.current_display_idx < len(dataframe_to_show):
+                    idx_to_select_in_df = self.current_display_idx
+                else: # Otherwise, if not init or index out of bounds, reset to 0
+                    self.current_display_idx = 0 
+                
+                iid_to_select_original_index_str = str(dataframe_to_show.index[idx_to_select_in_df])
+                if self.post_tree.exists(iid_to_select_original_index_str):
+                    self.post_tree.selection_set(iid_to_select_original_index_str)
+                    self.post_tree.focus(iid_to_select_original_index_str)
+                    self.post_tree.see(iid_to_select_original_index_str)
+            # If select_first_item is False, current_display_idx (likely -1 from welcome) persists.
+            # UI updates for labels etc. will be handled by show_welcome_message or update_display.
+        else: # dataframe_to_show is empty or None
             self.current_display_idx = -1
-            if hasattr(self, 'post_text_area') and self.post_text_area.winfo_exists(): self.post_text_area.config(state=tk.NORMAL); self.post_text_area.delete(1.0, tk.END); self.post_text_area.insert(tk.END, "No posts in current view."); self.post_text_area.config(state=tk.DISABLED)
-            self.update_post_number_label(); self.update_bookmark_button_status()
-        if not hasattr(self, '_init_complete'): self._init_complete = False
+            if hasattr(self, '_init_complete') and self._init_complete: # If app is running and list becomes empty
+                self.show_welcome_message()
+            # Else (during __init__ with no data), __init__ handles error or calls show_welcome_message
+            # Update labels for empty state only if not in init and not showing welcome (covered by show_welcome_message)
+            elif not (hasattr(self, '_init_complete') and self._init_complete):
+                 self.update_post_number_label(is_welcome=True)
+                 self.update_bookmark_button_status(is_welcome=True)
+                 if hasattr(self, 'edit_save_note_button'): self.edit_save_note_button.config(state=tk.DISABLED)
+        
+        if not hasattr(self, '_init_complete'): self._init_complete = False # Should already be set in __init__
     # --- END REPOPULATE_TREEVIEW ---
 
     # --- START DELTA_SEARCH_LOGIC ---
@@ -1199,25 +977,6 @@ class QPostViewer:
         today = datetime.datetime.now(); self._search_by_month_day(today.month, today.day)
     # --- END DELTA_SEARCH_LOGIC ---
 
-    # --- START MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
-    def _on_mousewheel(self, event, canvas_widget):
-        # Handles <MouseWheel> events
-        if event.delta:  # Primarily for Windows/macOS (event.delta is +/-120)
-            canvas_widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        elif event.num == 4:  # For Linux if MouseWheel event itself carries Button 4
-            canvas_widget.yview_scroll(-1, "units")
-        elif event.num == 5:  # For Linux if MouseWheel event itself carries Button 5
-            canvas_widget.yview_scroll(1, "units")
-
-    def _on_scroll_up(self, event, canvas_widget):
-        # Specifically for <Button-4> on Linux
-        canvas_widget.yview_scroll(-1, "units")
-
-    def _on_scroll_down(self, event, canvas_widget):
-        # Specifically for <Button-5> on Linux
-        canvas_widget.yview_scroll(1, "units")
-    # --- END MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
-
     # --- START USER_NOTES_METHODS ---
     def toggle_note_edit_mode(self):
         if self.df_displayed is None or self.df_displayed.empty or self.current_display_idx < 0:
@@ -1236,70 +995,61 @@ class QPostViewer:
                 self.user_notes[original_df_index] = note_content
             elif original_df_index in self.user_notes: # If content is empty, remove note
                 del self.user_notes[original_df_index]
-            
+
             self.note_text_area.config(state=tk.DISABLED)
             self.edit_save_note_button.config(text="Edit Note")
-            # Optionally, save immediately, or rely on on_closing
+            # Notes are saved globally on closing, or could save immediately here:
             # utils.save_user_notes(self.user_notes, config.USER_NOTES_FILE_PATH)
-            print(f"Note for post index {original_df_index} updated.")
+            print(f"Note for post index {original_df_index} updated in memory.")
     # --- END USER_NOTES_METHODS ---
 
     # --- START MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
+    def _on_mousewheel(self, event, canvas_widget):
+        if event.delta:
+            canvas_widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        elif event.num == 4:
+            canvas_widget.yview_scroll(-1, "units")
+        elif event.num == 5:
+            canvas_widget.yview_scroll(1, "units")
+
+    def _on_scroll_up(self, event, canvas_widget):
+        canvas_widget.yview_scroll(-1, "units")
+
+    def _on_scroll_down(self, event, canvas_widget):
+        canvas_widget.yview_scroll(1, "units")
+    # --- END MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
+
+    # --- START DOWNLOAD_WINDOW_AND_THREADING ---
     def show_download_window(self):
         if hasattr(self, 'download_win') and self.download_win is not None and self.download_win.winfo_exists():
-            self.download_win.lift()
-            self.download_win.focus_set()
-            return
+            self.download_win.lift(); self.download_win.focus_set(); return
 
-        self.download_win = tk.Toplevel(self.root)
-        self.download_win.title("Download Offline Content")
-
+        self.download_win = tk.Toplevel(self.root); self.download_win.title("Download Offline Content")
         try: dialog_bg = self.style.lookup("TFrame", "background")
         except tk.TclError: dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
         self.download_win.configure(bg=dialog_bg)
-
-        self.download_win.geometry("450x300")
-        self.download_win.transient(self.root)
-        self.download_win.grab_set()
-        self.download_win.resizable(False, False)
-
-        main_frame = ttk.Frame(self.download_win, padding="15")
-        main_frame.pack(expand=True, fill="both")
-
+        self.download_win.geometry("450x300"); self.download_win.transient(self.root); self.download_win.grab_set(); self.download_win.resizable(False, False)
+        main_frame = ttk.Frame(self.download_win, padding="15"); main_frame.pack(expand=True, fill="both")
         ttk.Label(main_frame, text="Download Post Images", font=('Arial', 11, 'bold')).pack(pady=(0, 5), anchor='w')
         ttk.Label(main_frame, text="Downloads all post image attachments (approx. 400-500MB).", wraplength=400, justify=tk.LEFT).pack(anchor='w', padx=5, pady=(0, 5))
-        self.download_images_button = ttk.Button(main_frame, text="Start Image Download", command=lambda: self._start_download_thread("images"))
-        self.download_images_button.pack(pady=(0, 15), fill='x')
-
+        self.download_images_button = ttk.Button(main_frame, text="Start Image Download", command=lambda: self._start_download_thread("images")); self.download_images_button.pack(pady=(0, 15), fill='x')
         ttk.Label(main_frame, text="Download Linked Articles", font=('Arial', 11, 'bold')).pack(pady=(10, 5), anchor='w')
         ttk.Label(main_frame, text="Downloads HTML from non-board/social links (700MB+ possible).", wraplength=400, justify=tk.LEFT).pack(anchor='w', padx=5, pady=(0, 5))
-        self.download_articles_button = ttk.Button(main_frame, text="Start Article Download", command=lambda: self._start_download_thread("articles"))
-        self.download_articles_button.pack(pady=(0, 15), fill='x')
-
-        status_frame = ttk.Labelframe(main_frame, text="Status", padding="10")
-        status_frame.pack(fill="x", pady=5, expand=True)
-        self.download_status_label = ttk.Label(status_frame, text="Idle.", wraplength=380, justify=tk.LEFT)
-        self.download_status_label.pack(anchor='w')
-
+        self.download_articles_button = ttk.Button(main_frame, text="Start Article Download", command=lambda: self._start_download_thread("articles")); self.download_articles_button.pack(pady=(0, 15), fill='x')
+        status_frame = ttk.Labelframe(main_frame, text="Status", padding="10"); status_frame.pack(fill="x", pady=5, expand=True)
+        self.download_status_label = ttk.Label(status_frame, text="Idle.", wraplength=380, justify=tk.LEFT); self.download_status_label.pack(anchor='w')
         ttk.Button(main_frame, text="Close", command=self.download_win.destroy).pack(side="bottom", pady=10)
 
     def _update_download_status(self, message):
-        if hasattr(self, 'download_status_label') and self.download_status_label.winfo_exists():
-            self.download_status_label.config(text=message)
-        else:
-            print(f"Download Status: {message}") # Fallback to console
+        if hasattr(self, 'download_status_label') and self.download_status_label.winfo_exists(): self.download_status_label.config(text=message)
+        else: print(f"Download Status: {message}")
 
     def _execute_download_task(self, task_name):
-        # This runs in the thread
         buttons_to_disable = []
-        if hasattr(self, 'download_images_button') and self.download_images_button.winfo_exists():
-            buttons_to_disable.append(self.download_images_button)
-        if hasattr(self, 'download_articles_button') and self.download_articles_button.winfo_exists():
-            buttons_to_disable.append(self.download_articles_button)
-
+        if hasattr(self, 'download_images_button') and self.download_images_button.winfo_exists(): buttons_to_disable.append(self.download_images_button)
+        if hasattr(self, 'download_articles_button') and self.download_articles_button.winfo_exists(): buttons_to_disable.append(self.download_articles_button)
         try:
             for btn in buttons_to_disable: self.root.after(0, lambda b=btn: b.config(state=tk.DISABLED))
-
             if task_name == "images":
                 self.root.after(0, lambda: self._update_download_status("Starting Image Download..."))
                 utils.download_all_post_images_util(self.df_all_posts, lambda msg: self.root.after(0, lambda m=msg: self._update_download_status(m)))
@@ -1308,45 +1058,157 @@ class QPostViewer:
                 self.root.after(0, lambda: self._update_download_status("Starting Article Download..."))
                 utils.scan_and_download_all_articles_util(self.df_all_posts, lambda msg: self.root.after(0, lambda m=msg: self._update_download_status(m)))
                 self.root.after(0, lambda: self._update_download_status("Article download finished."))
-            else:
-                self.root.after(0, lambda: self._update_download_status(f"Unknown task: {task_name}"))
-
-        except Exception as e:
-            error_msg = f"Error during {task_name} download: {e}"
-            print(error_msg)
-            self.root.after(0, lambda: self._update_download_status(error_msg))
+            else: self.root.after(0, lambda: self._update_download_status(f"Unknown task: {task_name}"))
+        except Exception as e: error_msg = f"Error during {task_name} download: {e}"; print(error_msg); self.root.after(0, lambda: self._update_download_status(error_msg))
         finally:
             for btn in buttons_to_disable: self.root.after(0, lambda b=btn: b.config(state=tk.NORMAL))
-            self.root.after(5000, lambda: self._update_download_status("Idle.")) # Reset after 5s
+            self.root.after(5000, lambda: self._update_download_status("Idle."))
 
     def _start_download_thread(self, task_name):
-        if self.df_all_posts is None or self.df_all_posts.empty:
-            messagebox.showinfo("No Data", "No posts loaded to download content from.", parent=self.download_win)
-            return
-
-        confirm_msg = ""
-        if task_name == "images":
-            confirm_msg = "This will download all available Q post images (approx. 400-500MB).\n\nThis can take a while. Continue?"
-        elif task_name == "articles":
-            confirm_msg = "This will download linked web articles (700MB+ possible).\n\nThis can take a *very* long time and consume significant disk space. Continue?"
+        if self.df_all_posts is None or self.df_all_posts.empty: messagebox.showinfo("No Data", "No posts loaded to download content from.", parent=self.download_win if hasattr(self, 'download_win') and self.download_win.winfo_exists() else self.root); return
+        confirm_msg = "";
+        if task_name == "images": confirm_msg = "This will download all available Q post images (approx. 400-500MB).\n\nThis can take a while. Continue?"
+        elif task_name == "articles": confirm_msg = "This will download linked web articles (700MB+ possible).\n\nThis can take a *very* long time and consume significant disk space. Continue?"
         else: return
-
-        if not messagebox.askyesno("Confirm Download", confirm_msg, parent=self.download_win):
-            return
-
-        thread = threading.Thread(target=self._execute_download_task, args=(task_name,), daemon=True)
-        thread.start()
+        if not messagebox.askyesno("Confirm Download", confirm_msg, parent=self.download_win if hasattr(self, 'download_win') and self.download_win.winfo_exists() else self.root): return
+        thread = threading.Thread(target=self._execute_download_task, args=(task_name,), daemon=True); thread.start()
     # --- END DOWNLOAD_WINDOW_AND_THREADING ---
+
+    # --- START SHOW_SETTINGS_WINDOW ---
+    def show_settings_window(self):
+        if hasattr(self, 'settings_win') and self.settings_win is not None and self.settings_win.winfo_exists(): self.settings_win.lift(); self.settings_win.focus_set(); return
+        self.settings_win = tk.Toplevel(self.root); self.settings_win.title("QView Settings")
+        try: dialog_bg = self.style.lookup("TFrame", "background")
+        except tk.TclError: dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
+        self.settings_win.configure(bg=dialog_bg); self.settings_win.geometry("400x255"); self.settings_win.transient(self.root); self.settings_win.grab_set(); self.settings_win.resizable(False, False); self.settings_win.protocol("WM_DELETE_WINDOW", self.on_settings_window_close)
+        main_frame = ttk.Frame(self.settings_win, padding="10"); main_frame.pack(expand=True, fill="both")
+        theme_frame = ttk.Labelframe(main_frame, text="Display Theme", padding="10"); theme_frame.pack(fill="x", pady=5)
+        self.settings_theme_var = tk.StringVar(value=self.app_settings.get("theme", settings.DEFAULT_SETTINGS["theme"]))
+        dark_rb_theme = ttk.Radiobutton(theme_frame, text="Dark", variable=self.settings_theme_var, value="dark", command=self.on_setting_change); dark_rb_theme.pack(side="left", padx=5, expand=True)
+        light_rb_theme = ttk.Radiobutton(theme_frame, text="Light", variable=self.settings_theme_var, value="light", command=self.on_setting_change); light_rb_theme.pack(side="left", padx=5, expand=True)
+        link_pref_frame = ttk.Labelframe(main_frame, text="Link Opening Preference", padding="10"); link_pref_frame.pack(fill="x", pady=5)
+        self.settings_link_pref_var = tk.StringVar(value=self.app_settings.get("link_opening_preference", settings.DEFAULT_SETTINGS.get("link_opening_preference", "default"))) # Ensure default for preference
+        rb_default = ttk.Radiobutton(link_pref_frame, text="System Default Browser", variable=self.settings_link_pref_var, value="default", command=self.on_setting_change); rb_default.pack(anchor="w", padx=5)
+        rb_chrome_incognito = ttk.Radiobutton(link_pref_frame, text="Google Chrome (Incognito, if available)", variable=self.settings_link_pref_var, value="chrome_incognito", command=self.on_setting_change); rb_chrome_incognito.pack(anchor="w", padx=5)
+        close_button_frame = ttk.Frame(main_frame); close_button_frame.pack(side="bottom", fill="x", pady=(10,0))
+        ttk.Button(close_button_frame, text="Close", command=self.on_settings_window_close).pack(pady=5)
+    # --- END SHOW_SETTINGS_WINDOW ---
+
+    # --- START ON_SETTING_CHANGE ---
+    def on_setting_change(self, event=None):
+        # Theme
+        new_theme = self.settings_theme_var.get() # Semicolon removed, statement on its own line
+        theme_changed = False
+
+        if self.app_settings.get("theme") != new_theme: # This is the controlling 'if'
+            # These lines are now INSIDE the 'if' block
+            self.app_settings["theme"] = new_theme
+            self.current_theme = new_theme
+            theme_changed = True
+            
+            # This nested 'if/else' is now correctly indented
+            if new_theme == "dark": 
+                self.apply_dark_theme()
+            else: 
+                self.apply_light_theme()
+            
+            if hasattr(self, 'theme_toggle_button'): 
+                self.theme_toggle_button.config(text="Into the Dark" if new_theme == "light" else "Dark to Light")
+            
+            if hasattr(self, 'settings_win') and self.settings_win and self.settings_win.winfo_exists():
+                try: 
+                    self.settings_win.configure(bg=self.style.lookup("TFrame", "background"))
+                except tk.TclError: 
+                    pass
+
+        # Link Opening Preference (This part was likely fine, but ensure its alignment is correct with the first 'if' block)
+        new_link_pref = self.settings_link_pref_var.get() # Semicolon removed
+        link_pref_changed = False
+        if self.app_settings.get("link_opening_preference") != new_link_pref: # This 'if' should align with the first 'if'
+            self.app_settings["link_opening_preference"] = new_link_pref
+            link_pref_changed = True
+
+        if theme_changed or link_pref_changed:
+            settings.save_settings(self.app_settings)
+            print(f"Settings saved: Theme='{self.app_settings.get('theme')}', Link Pref='{self.app_settings.get('link_opening_preference')}'")
+            if theme_changed: # Only update full display if theme changed
+                if self.current_display_idx != -1 and self.df_displayed is not None and not self.df_displayed.empty : 
+                    self.update_display()
+                else: 
+                    self.show_welcome_message()
+    # --- END ON_SETTING_CHANGE ---
+
+    # --- START ON_SETTINGS_WINDOW_CLOSE ---
+    def on_settings_window_close(self):
+        if hasattr(self, 'settings_win') and self.settings_win: self.settings_win.destroy(); self.settings_win = None
+    # --- END ON_SETTINGS_WINDOW_CLOSE ---
+
+    # --- START SHOW_HELP_WINDOW ---
+    def show_help_window(self):
+        import webbrowser
+        try: dialog_bg = self.style.lookup("TFrame", "background"); bold_font = ('Arial', 12, 'bold', 'underline'); normal_font = ('Arial', 10); link_fg = self.link_label_fg_dark if self.current_theme == "dark" else self.link_label_fg_light
+        except tk.TclError: dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"; bold_font = ('Arial', 12, 'bold', 'underline'); normal_font = ('Arial', 10); link_fg = "#6DAEFF" if self.current_theme == "dark" else "#0056b3"
+        help_win = tk.Toplevel(self.root); help_win.title("QView - Help/Tips"); help_win.configure(bg=dialog_bg); help_win.geometry("550x500"); help_win.transient(self.root); help_win.grab_set() # Increased height for support section
+        main_help_frame = ttk.Frame(help_win, padding="15", style="TFrame"); main_help_frame.pack(expand=True, fill="both")
+        canvas = tk.Canvas(main_help_frame, bg=dialog_bg, highlightthickness=0); scrollbar = ttk.Scrollbar(main_help_frame, orient="vertical", command=canvas.yview); scrollable_content_frame = ttk.Frame(canvas, style="TFrame")
+        scrollable_content_frame.bind("<Configure>",lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_content_frame, anchor="nw"); canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True); scrollbar.pack(side="right", fill="y")
+        ttk.Label(scrollable_content_frame, text="Help & Tips", font=bold_font).pack(pady=(0, 10), anchor='w')
+        tips = ["- Use the Treeview (left) to navigate posts.", "- Click Treeview headers to sort (Post # & Date).", "- Use 'Post #' entry to jump directly (e.g., 123, 10-15, 1,5,10).", "- 'Keyword/Theme' searches post text and assigned themes.", "- 'Search by Date' uses a calendar for specific day lookups.", "- 'Delta Search' finds posts on the same Month/Day across all years.",  "- 'Today's Deltas' shows posts from this M/D (hover for date).", "- Bookmark posts and view them with 'View Bookmarks'.", "- Export the current list to HTML or CSV.", "- Toggle 'Dark to Light' / 'Into the Dark' for theme.", "- Links in post text and 'Show Links' window are clickable.", "- Use 'Settings' to change the application theme and link opening preferences."]
+        for tip in tips: ttk.Label(scrollable_content_frame, text=tip, wraplength=480, justify=tk.LEFT, font=normal_font).pack(anchor='w', padx=5, pady=1)
+        ttk.Label(scrollable_content_frame, text="Resources", font=bold_font).pack(pady=(20, 10), anchor='w')
+        resources = {"QAnon.pub": "https://qanon.pub/", "Q Agg (qagg.news)": "https://qagg.news/", "Gematrix.org": "https://www.gematrix.org/"}
+        for text, url in resources.items():
+            label = ttk.Label(scrollable_content_frame, text=text, cursor="hand2", style="TLabel"); label.configure(font=(normal_font[0], normal_font[1], "underline"), foreground=link_fg); label.pack(anchor='w', padx=5, pady=2); label.bind("<Button-1>", lambda e, link=url: utils.open_link_with_preference(link, self.app_settings))
+        # --- Support & Feedback Section ---
+        ttk.Label(scrollable_content_frame, text="Support & Feedback", font=bold_font).pack(pady=(20, 10), anchor='w')
+        support_text = "If you find QView helpful, you can show your support and help keep the coffee flowing!"
+        ttk.Label(scrollable_content_frame, text=support_text, wraplength=460, justify=tk.LEFT, font=normal_font).pack(anchor='w', padx=5, pady=1)
+        donation_link_text = "Buy me a coffee ☕"; donation_url = "https://www.buymeacoffee.com/qview1776"
+        donation_label = ttk.Label(scrollable_content_frame, text=donation_link_text, cursor="hand2", style="TLabel"); donation_label.configure(font=(normal_font[0], normal_font[1], "underline"), foreground=link_fg); donation_label.pack(anchor='w', padx=5, pady=2); donation_label.bind("<Button-1>", lambda e, link=donation_url: utils.open_link_with_preference(link, self.app_settings))
+        feedback_email_text = "Feedback/Suggestions: qview1776@gmail.com"; feedback_label = ttk.Label(scrollable_content_frame, text=feedback_email_text, style="TLabel"); feedback_label.configure(font=normal_font); feedback_label.pack(anchor='w', padx=5, pady=(5,2))
+        # --- End Support & Feedback Section ---
+        close_button_frame = ttk.Frame(main_help_frame, style="TFrame"); close_button_frame.pack(fill=tk.X, pady=(15,0))
+        ttk.Button(close_button_frame, text="Close", command=help_win.destroy).pack(pady=(0,5))
+        widgets_to_bind_scroll = [canvas, scrollable_content_frame] + list(scrollable_content_frame.winfo_children())
+        for widget in widgets_to_bind_scroll:
+            widget.bind("<MouseWheel>", lambda e, cw=canvas: self._on_mousewheel(e, cw), add="+")
+            widget.bind("<Button-4>", lambda e, cw=canvas: self._on_scroll_up(e, cw), add="+")
+            widget.bind("<Button-5>", lambda e, cw=canvas: self._on_scroll_down(e, cw), add="+")
+    # --- END SHOW_HELP_WINDOW ---
+
+    # --- START SHOW_ABOUT_DIALOG ---
+    def show_about_dialog(self):
+        messagebox.showinfo("About QView", "QView - Post Viewer\n\nVersion: 0.8.0 (Welcome Screen Update)\nDeveloped for exploring Q posts data.\n\nHappy digging!", parent=self.root)
+    # --- END SHOW_ABOUT_DIALOG ---
+
+    # --- START SHOW_POST_LINKS_WINDOW_EXTERNAL ---
+    def show_post_links_window_external(self):
+        if not self.current_post_urls: messagebox.showinfo("Links", "No URLs found in the current post.", parent=self.root); return
+        display_urls = self.current_post_urls
+        try: popup_bg = self.style.lookup("TFrame", "background"); canvas_bg = self.style.lookup("Treeview", "fieldbackground"); link_label_fg = self.link_label_fg_dark if self.current_theme == "dark" else self.link_label_fg_light
+        except tk.TclError: popup_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"; canvas_bg = "#3c3f41" if self.current_theme == "dark" else "#ffffff"; link_label_fg = self.link_label_fg_dark if self.current_theme == "dark" else self.link_label_fg_light
+        link_window = tk.Toplevel(self.root); link_window.title("Post URLs"); link_window.configure(bg=popup_bg); link_window.geometry("600x400"); link_window.transient(self.root); link_window.grab_set()
+        canvas = tk.Canvas(link_window, bg=canvas_bg, highlightthickness=0); scrollbar = ttk.Scrollbar(link_window, orient="vertical", command=canvas.yview); scrollable_frame = ttk.Frame(canvas, style="TFrame")
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw"); canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True, padx=5, pady=5); scrollbar.pack(side="right", fill="y")
+        for url in display_urls:
+            def open_url_action_factory(u=url): return lambda e: utils.open_link_with_preference(u, self.app_settings)
+            link_label = ttk.Label(scrollable_frame, text=url, cursor="hand2", style="TLabel"); link_label.configure(font=("TkDefaultFont", 10, "underline"), foreground=link_label_fg); link_label.pack(anchor="w", padx=10, pady=3); link_label.bind("<Button-1>", open_url_action_factory(url))
+        def frame_width(event): canvas_width = event.width; canvas.itemconfig(canvas_window, width = canvas_width)
+        canvas.bind("<Configure>", frame_width)
+    # --- END SHOW_POST_LINKS_WINDOW_EXTERNAL ---
 
     # --- START OPEN_DOWNLOADED_ARTICLE ---
     def open_downloaded_article(self, filepath):
         if filepath and os.path.exists(filepath):
             file_url = f"file:///{os.path.abspath(filepath)}"
-            utils.open_link_with_preference(file_url, self.app_settings) # Use new preference handler
+            utils.open_link_with_preference(file_url, self.app_settings)
         else:
             messagebox.showerror("Error", "Saved article file not found or path is invalid.", parent=self.root)
             self.update_display()
-    # --- END OPEN_DOWNLOADED_ARTICLE ---
     # --- END OPEN_DOWNLOADED_ARTICLE ---
 
 # --- END QPOSTVIEWER_CLASS_DEFINITION ---
