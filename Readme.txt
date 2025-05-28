@@ -88,6 +88,21 @@ We believe QView has become a significant and powerful tool for anyone looking t
     * `q_images/`: Directory for downloaded post images.
     * `linked_articles/`: Directory for downloaded HTML articles.
 
+## Post Data Source
+
+QView does not include the Q post dataset (`posts.url-normalized.json`) by default due to size and licensing considerations.
+
+You have two options of obtaining the post data:
+
+1. **Use a scraper or archive:**
+   - Several public sources exist where Q posts have been archived in JSON format.
+   - One such archive was maintained by [jkingsman/JSON-QAnon](https://github.com/jkingsman/JSON-QAnon).
+
+2. **Normalize your own data (Recommended):**
+   - A script (`normalize_posts.py`) will be added soon to convert external JSON formats into QView’s required structure.
+   - This lets you keep full control of your data structure and attribution.
+
+
 ## Basic Usage Guide
 
 * **Browse:** The list of posts appears on the left. Click any post to see its full details on the right. Use the "Next >>" and "<< Prev" buttons for sequential navigation.
