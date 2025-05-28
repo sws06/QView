@@ -130,15 +130,7 @@ class QPostViewer:
         self.tree_frame.grid(row=0, column=0, padx=10, pady=(10,0), sticky="nswe")
         root.grid_rowconfigure(0, weight=1)
         root.grid_columnconfigure(0, weight=1, minsize=280)
-
-        self.details_outer_frame = ttk.Frame(root)
-        self.details_outer_frame.grid(row=0, column=1, padx=(0,10), pady=(10,0), sticky="nswe")
-        root.grid_columnconfigure(1, weight=3)
-        self.details_outer_frame.grid_rowconfigure(0, weight=2) # Post text area
-        self.details_outer_frame.grid_rowconfigure(1, weight=1) # Image display
-        self.details_outer_frame.grid_rowconfigure(2, weight=1) # Notes section
-        self.details_outer_frame.grid_columnconfigure(0, weight=1)
-
+        # ====> PASTE THIS MISSING BLOCK HERE <====
         self.post_tree = ttk.Treeview(self.tree_frame, columns=("Post #", "Date", "Bookmarked"), show="headings")
         self.scrollbar_y = ttk.Scrollbar(self.tree_frame, orient="vertical", command=self.post_tree.yview)
         self.post_tree.configure(yscrollcommand=self.scrollbar_y.set)
@@ -152,7 +144,15 @@ class QPostViewer:
         self.scrollbar_y.grid(row=0, column=1, sticky="ns")
         self.tree_frame.grid_rowconfigure(0, weight=1)
         self.tree_frame.grid_columnconfigure(0, weight=1)
-
+        # ====> END OF MISSING BLOCK <====
+        self.details_outer_frame = ttk.Frame(root)
+        self.details_outer_frame.grid(row=0, column=1, padx=(0,10), pady=(10,0), sticky="nswe")
+        root.grid_columnconfigure(1, weight=3)
+        self.details_outer_frame.grid_rowconfigure(0, weight=2) # Post text area
+        self.details_outer_frame.grid_rowconfigure(1, weight=1) # Image display
+        # Note section is now a popup, row 2 configuration might not be needed or set to weight 0
+        self.details_outer_frame.grid_rowconfigure(2, weight=0)
+        # ====> START OF BLOCK TO PASTE <====
         self.text_area_frame = ttk.Frame(self.details_outer_frame)
         self.text_area_frame.grid(row=0, column=0, sticky="nswe")
         self.text_area_frame.grid_rowconfigure(0, weight=1)
@@ -170,32 +170,13 @@ class QPostViewer:
         self.image_display_frame = ttk.Frame(self.details_outer_frame)
         self.image_display_frame.grid(row=1, column=0, sticky="nswe", pady=(5,0))
         self.image_display_frame.grid_columnconfigure(0, weight=1)
-
-        # --- Notes Frame ---
-        self.notes_frame = ttk.Labelframe(self.details_outer_frame, text="User Note", padding=(10,5))
-        self.notes_frame.grid(row=2, column=0, sticky="nswe", pady=(5,0))
-        # self.details_outer_frame.grid_rowconfigure(2, weight=1) # Already set above
-
-        self.notes_frame.grid_columnconfigure(0, weight=1)
-        self.notes_frame.grid_rowconfigure(0, weight=1)
-
-        self.note_text_area = tk.Text(self.notes_frame, wrap=tk.WORD, height=5, font=("TkDefaultFont", 10), relief=tk.FLAT, borderwidth=1, padx=5, pady=5)
-        self.note_text_area.grid(row=0, column=0, sticky="nswe")
-        self.note_text_scrollbar = ttk.Scrollbar(self.notes_frame, orient="vertical", command=self.note_text_area.yview)
-        self.note_text_area.configure(yscrollcommand=self.note_text_scrollbar.set)
-        self.note_text_scrollbar.grid(row=0, column=1, sticky="ns")
-
-        self.edit_save_note_button = ttk.Button(self.notes_frame, text="Edit Note", command=self.toggle_note_edit_mode, width=10)
-        self.edit_save_note_button.grid(row=1, column=0, columnspan=2, pady=(5,0), sticky="e")
-        self.edit_save_note_button.config(state=tk.DISABLED)
-        # --- End Notes Frame ---
-
+        # ====> END OF BLOCK TO PASTE <====
         self.post_text_area.bind("<KeyPress>", self._prevent_text_edit)
         self.configure_text_tags()
 
         controls_main_frame = ttk.Frame(root)
         controls_main_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=(5,10), sticky="ew")
-
+        
         nav_frame = ttk.Frame(controls_main_frame)
         nav_frame.pack(pady=(0,5), fill=tk.X)
         self.prev_button = ttk.Button(nav_frame, text="<< Prev", command=self.prev_post, width=8)
@@ -255,6 +236,9 @@ class QPostViewer:
         self.bookmark_button.config(state=tk.DISABLED)
         self.view_bookmarks_button = ttk.Button(buttons_frame3, text=f"View Bookmarks ({len(self.bookmarked_posts)})", command=self.view_bookmarked_gui_posts)
         self.view_bookmarks_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+
+        self.view_edit_note_button = ttk.Button(buttons_frame3, text="View/Edit Note", command=self.show_note_popup, state=tk.DISABLED)
+        self.view_edit_note_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
 
         bottom_buttons_frame = ttk.Frame(controls_main_frame)
         bottom_buttons_frame.pack(pady=(10,0), fill=tk.X, expand=True)
@@ -348,7 +332,7 @@ class QPostViewer:
         self.style.map("TCombobox", fieldbackground=[("readonly", entry_bg)], background=[("readonly", button_bg)], foreground=[("readonly", fg_color)], lightcolor=[("readonly", button_bg)], darkcolor=[("readonly", button_bg)])
 
         self.post_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
-        if hasattr(self, 'note_text_area'): self.note_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
+        # if hasattr(self, 'note_text_area'): self.note_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg) # Old embedded notes
         if hasattr(self, 'image_display_frame'): self.image_display_frame.configure(style="TFrame")
 
         self.post_text_area.tag_configure("bold_label", foreground="#a9b7c6")
@@ -395,7 +379,7 @@ class QPostViewer:
         self.style.configure("TCombobox", fieldbackground=entry_bg, background=button_bg, foreground=fg_color, arrowcolor=fg_color, selectbackground=entry_bg, selectforeground=fg_color)
         self.style.map("TCombobox", fieldbackground=[("readonly", entry_bg)], background=[("readonly", button_bg)], foreground=[("readonly", fg_color)], lightcolor=[("readonly", button_bg)], darkcolor=[("readonly", button_bg)])
         self.post_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
-        if hasattr(self, 'note_text_area'): self.note_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
+        # if hasattr(self, 'note_text_area'): self.note_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg) # Old embedded notes
         if hasattr(self, 'image_display_frame'): self.image_display_frame.configure(style="TFrame")
         self.post_text_area.tag_configure("bold_label", foreground="#333333"); self.post_text_area.tag_configure("post_number_val", foreground="#D9534F"); self.post_text_area.tag_configure("date_val", foreground="#5CB85C"); self.post_text_area.tag_configure("author_val", foreground="#555555"); self.post_text_area.tag_configure("themes_val", foreground="#8E44AD"); self.post_text_area.tag_configure("image_val", foreground="#337AB7"); self.post_text_area.tag_configure("clickable_link_style", foreground=self.link_label_fg_light); self.post_text_area.tag_configure("bookmarked_header", foreground="#F0AD4E"); self.post_text_area.tag_configure("quoted_ref_header", foreground="#4A4A4A"); self.post_text_area.tag_configure("quoted_ref_text_body", foreground="#202020")
         self.post_text_area.tag_configure("welcome_title_tag", foreground="#D9534F")
@@ -588,14 +572,17 @@ class QPostViewer:
             if self.current_post_urls: self.show_links_button.config(state=tk.NORMAL)
             else: self.show_links_button.config(state=tk.DISABLED)
 
-        if hasattr(self, 'edit_save_note_button'): self.edit_save_note_button.config(state=tk.NORMAL)
-        if hasattr(self, 'note_text_area'):
-            current_note = self.user_notes.get(str(original_df_index), "")
-            self.note_text_area.config(state=tk.NORMAL)
-            self.note_text_area.delete(1.0, tk.END)
-            if current_note: self.note_text_area.insert(tk.END, current_note)
-            self.note_text_area.config(state=tk.DISABLED)
-            if hasattr(self, 'edit_save_note_button'): self.edit_save_note_button.config(text="Edit Note")
+        # --- Enable/Disable View/Edit Note button ---
+        if hasattr(self, 'view_edit_note_button'):
+            # This condition checks if a valid post is currently being displayed
+            if self.df_displayed is not None and not self.df_displayed.empty and \
+               0 <= self.current_display_idx < len(self.df_displayed):
+                self.view_edit_note_button.config(state=tk.NORMAL)
+            else:
+                # This case should ideally be handled by show_welcome_message,
+                # which already disables this button. But as a fallback:
+                self.view_edit_note_button.config(state=tk.DISABLED)
+        # --- End Enable/Disable ---
 
 
         self.post_text_area.config(state=tk.DISABLED); self.update_post_number_label(); self.update_bookmark_button_status()
@@ -640,10 +627,8 @@ class QPostViewer:
         if hasattr(self, 'view_article_button'): self.view_article_button.config(text="Article Not Saved", state=tk.DISABLED, command=lambda: None)
         self.update_post_number_label(is_welcome=True)
         self.update_bookmark_button_status(is_welcome=True)
-        if hasattr(self, 'edit_save_note_button'): self.edit_save_note_button.config(state=tk.DISABLED)
-        if hasattr(self, 'note_text_area'):
-            self.note_text_area.config(state=tk.NORMAL); self.note_text_area.delete(1.0, tk.END)
-            self.note_text_area.config(state=tk.DISABLED)
+        if hasattr(self, 'view_edit_note_button'): self.view_edit_note_button.config(state=tk.DISABLED) # Changed from edit_save_note_button
+        # No direct note_text_area in main UI anymore
     # --- END SHOW_WELCOME_MESSAGE ---
 
     # --- START UPDATE_POST_NUMBER_LABEL ---
@@ -978,29 +963,64 @@ class QPostViewer:
     # --- END DELTA_SEARCH_LOGIC ---
 
     # --- START USER_NOTES_METHODS ---
-    def toggle_note_edit_mode(self):
-        if self.df_displayed is None or self.df_displayed.empty or self.current_display_idx < 0:
+    def show_note_popup(self):
+        if self.df_displayed is None or self.df_displayed.empty or not (0 <= self.current_display_idx < len(self.df_displayed)):
+            messagebox.showwarning("No Post Selected", "Please select a post to view or edit its note.", parent=self.root)
             return
 
-        original_df_index = str(self.df_displayed.index[self.current_display_idx]) # Use string key
+        original_df_index = str(self.df_displayed.index[self.current_display_idx])
+        current_note = self.user_notes.get(original_df_index, "")
 
-        current_state = self.note_text_area.cget("state")
-        if current_state == tk.DISABLED:
-            self.note_text_area.config(state=tk.NORMAL)
-            self.edit_save_note_button.config(text="Save Note")
-            self.note_text_area.focus()
-        else: # tk.NORMAL
-            note_content = self.note_text_area.get(1.0, tk.END).strip()
+        note_popup = tk.Toplevel(self.root)
+        note_popup.title(f"Note for Post (Index: {original_df_index})")
+        note_popup.geometry("500x400")
+        note_popup.transient(self.root)
+        note_popup.grab_set()
+
+        try:
+            dialog_bg = self.style.lookup("TFrame", "background")
+            text_bg = self.style.lookup("TEntry", "fieldbackground")
+            text_fg = self.style.lookup("TEntry", "foreground")
+        except tk.TclError:
+            dialog_bg = "#f0f0f0" if self.current_theme == "light" else "#2b2b2b"
+            text_bg = "#ffffff" if self.current_theme == "light" else "#3c3f41"
+            text_fg = "#000000" if self.current_theme == "light" else "#e0e0e0"
+        
+        note_popup.configure(bg=dialog_bg)
+
+        popup_main_frame = ttk.Frame(note_popup, padding=10)
+        popup_main_frame.pack(expand=True, fill=tk.BOTH)
+
+        note_text_widget = tk.Text(popup_main_frame, wrap=tk.WORD, height=15, font=("TkDefaultFont", 10), relief=tk.SOLID, borderwidth=1, padx=5, pady=5)
+        note_text_widget.configure(bg=text_bg, fg=text_fg, insertbackground=text_fg)
+        note_text_widget.pack(expand=True, fill=tk.BOTH, pady=(0,10))
+        note_text_widget.insert(tk.END, current_note)
+        note_text_widget.focus_set()
+
+        button_frame = ttk.Frame(popup_main_frame)
+        button_frame.pack(fill=tk.X)
+
+        def save_and_close():
+            note_content = note_text_widget.get(1.0, tk.END).strip()
             if note_content:
                 self.user_notes[original_df_index] = note_content
             elif original_df_index in self.user_notes: # If content is empty, remove note
                 del self.user_notes[original_df_index]
+            
+            utils.save_user_notes(self.user_notes, config.USER_NOTES_FILE_PATH) # Save immediately
+            print(f"Note for post index {original_df_index} saved.")
+            note_popup.destroy()
 
-            self.note_text_area.config(state=tk.DISABLED)
-            self.edit_save_note_button.config(text="Edit Note")
-            # Notes are saved globally on closing, or could save immediately here:
-            # utils.save_user_notes(self.user_notes, config.USER_NOTES_FILE_PATH)
-            print(f"Note for post index {original_df_index} updated in memory.")
+        def cancel_and_close():
+            note_popup.destroy()
+
+        save_button = ttk.Button(button_frame, text="Save Note", command=save_and_close)
+        save_button.pack(side=tk.RIGHT, padx=5)
+        cancel_button = ttk.Button(button_frame, text="Cancel", command=cancel_and_close)
+        cancel_button.pack(side=tk.RIGHT)
+
+        # Ensure popup stays on top and handles closing via window manager
+        note_popup.protocol("WM_DELETE_WINDOW", cancel_and_close)
     # --- END USER_NOTES_METHODS ---
 
     # --- START MOUSEWHEEL_HELPERS_FOR_SCROLLABLE_WINDOWS ---
