@@ -1,6 +1,13 @@
 # Ignore user-specific data, downloaded content, and caches
 user_data/
 posts_df.pkl # If it's in the root, but we plan to move it to user_data
+# QView dev & patch system exclusions
+posts.url-normalized.json        # Don't distribute post content
+patch_instructions.txt           # Temporary, overwritten during patching
+gui - Copy.py                    # Temporary GUI backup (manual copy)
+patcher.py
+
+
 
 # If you have these folders directly in the root (before user_data was created)
 # Or if you want to be extra sure even if they are in user_data.
