@@ -38,6 +38,9 @@ USER_NOTES_FILE_PATH = os.path.join(USER_DATA_ROOT, "user_notes.json")
 IMAGE_DIR_NAME = "q_images"  # Just the name, not used for full path construction here
 IMAGE_DIR = os.path.join(USER_DATA_ROOT, IMAGE_DIR_NAME)  # Full path
 
+THUMBNAIL_DIR_NAME = "_thumbnails" # Subdirectory for cached thumbnails
+THUMBNAIL_DIR = os.path.join(IMAGE_DIR, THUMBNAIL_DIR_NAME) # Full path to thumbnails
+
 LINKED_ARTICLES_DIR_NAME = "linked_articles"  # Just the name
 LINKED_ARTICLES_DIR = os.path.join(
     USER_DATA_ROOT, LINKED_ARTICLES_DIR_NAME
@@ -47,10 +50,9 @@ LINKED_ARTICLES_DIR = os.path.join(
 try:
     os.makedirs(IMAGE_DIR, exist_ok=True)
     os.makedirs(LINKED_ARTICLES_DIR, exist_ok=True)
+    os.makedirs(THUMBNAIL_DIR, exist_ok=True) # Ensure thumbnail directory is also created
 except OSError as e:
-    print(
-        f"Warning: Could not create image/article directories in {USER_DATA_ROOT}: {e}"
-    )
+    print(f"Warning: Could not create image/article/thumbnail directories in {USER_DATA_ROOT}: {e}")
     # App might fail to save images/articles if these paths aren't writable / creatable.
 
 # --- END FILE_PATHS_AND_DIRECTORIES ---

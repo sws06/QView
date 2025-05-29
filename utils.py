@@ -256,34 +256,78 @@ def format_cell_text_for_gui_html(cell_text):
 
 
 # --- START IMAGE_OPENING ---
+from PIL import Image, ImageTk # Ensure ImageTk is imported
+
+def get_or_create_thumbnail(original_image_path, thumbnail_cache_dir, size=(300, 300)):
+    """
+    Loads a thumbnail from cache or creates it from the original image.
+    Saves the created thumbnail to the cache.
+    Returns an ImageTk.PhotoImage object or None.
+    """
+    if not os.path.exists(original_image_path):
+        # print(f"Original image not found: {original_image_path}")
+        return None
+
+    original_filename = os.path.basename(original_image_path)
+    thumbnail_filename = f"thumb_{original_filename}"
+    thumbnail_path = os.path.join(thumbnail_cache_dir, thumbnail_filename)
+
+    try:
+        if os.path.exists(thumbnail_path):
+            # Load from cache
+            img_pil = Image.open(thumbnail_path)
+            # print(f"Loaded thumbnail from cache: {thumbnail_path}")
+        else:
+            # Create thumbnail and save to cache
+            img_pil = Image.open(original_image_path)
+            img_pil.thumbnail(size, Image.Resampling.LANCZOS) # Use LANCZOS for better quality resize
+            os.makedirs(thumbnail_cache_dir, exist_ok=True) # Ensure cache dir exists
+            img_pil.save(thumbnail_path)
+            # print(f"Created and cached thumbnail: {thumbnail_path}")
+        
+        # Ensure image is in a mode compatible with PhotoImage (e.g., RGB, RGBA)
+        if img_pil.mode not in ("RGB", "RGBA"):
+            img_pil = img_pil.convert("RGBA")
+            
+        photo = ImageTk.PhotoImage(img_pil)
+        return photo
+    except FileNotFoundError: # Should be caught by the initial exists check, but as a safeguard
+        print(f"Error (FNF): Original image not found during thumbnail processing: {original_image_path}")
+        return None
+    except Exception as e:
+        print(f"Error processing thumbnail for {original_image_path}: {e}")
+        # Optionally, try to delete a corrupted cached thumbnail if loading it failed
+        if os.path.exists(thumbnail_path):
+            try:
+                # Check if the error was during loading an existing thumbnail
+                # This is a simple check; more robust would be to flag if it's post-Image.open(thumbnail_path)
+                if 'cannot identify image file' in str(e).lower() or 'decoder' in str(e).lower():
+                     print(f"Deleting potentially corrupted thumbnail: {thumbnail_path}")
+                     os.remove(thumbnail_path)
+            except Exception as del_e:
+                print(f"Error deleting corrupted thumbnail {thumbnail_path}: {del_e}")
+        return None
+
 def open_image_external(image_path, root_for_messagebox=None):
     try:
         abs_path = os.path.abspath(image_path)
         if platform.system() == "Windows":
             os.startfile(abs_path)
         else:
-            if platform.system() == "Darwin":  # macOS
+            if platform.system() == "Darwin": # macOS
                 subprocess.call(["open", abs_path])
-            else:  # Linux and other OS
+            else: # Linux and other OS
                 try:
                     subprocess.call(["xdg-open", abs_path])
-                except FileNotFoundError:  # Fallback if xdg-open is not available
+                except FileNotFoundError: # Fallback if xdg-open is not available
                     webbrowser.open(f"file://{abs_path}")
         print(f"Attempting to open image externally: {abs_path}")
     except Exception as e:
         print(f"Error opening image {image_path} externally: {e}")
         if root_for_messagebox:
-            messagebox.showerror(
-                "Image Error",
-                f"Could not open image:\n{image_path}\n\n{e}",
-                parent=root_for_messagebox,
-            )
+            messagebox.showerror("Image Error", f"Could not open image:\n{image_path}\n\n{e}", parent=root_for_messagebox)
         else:
-            messagebox.showerror(
-                "Image Error", f"Could not open image:\n{image_path}\n\n{e}"
-            )
-
-
+            messagebox.showerror("Image Error", f"Could not open image:\n{image_path}\n\n{e}")
 # --- END IMAGE_OPENING ---
 
 import os
