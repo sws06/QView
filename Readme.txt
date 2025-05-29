@@ -74,6 +74,9 @@ We believe QView has become a significant and powerful tool for anyone looking t
 1.  **Install Prerequisites:** Ensure Python 3 and all libraries listed above are installed in your Python environment.
 2.  **Get the Code:** Place all QView application files (`main.py`, `gui.py`, `utils.py`, `config.py`, `data.py`, `settings.py`) in a single directory on your computer.
 3.  **Data File:** Obtain the Q posts data file, ensure it's named `posts.url-normalized.json`, and place it in the **same root directory** as the QView application files.
+> **Note:** Due to data licensing and size considerations, `posts.url-normalized.json` is not included in the repository.  
+> You can generate your own using the included `normalize_posts.py` script (coming soon), or refer to the post data source for sourcing your own dataset.
+
 4.  **Run:** Open a terminal or command prompt, navigate to the QView application directory, and execute:
     ```bash
     python main.py
@@ -84,6 +87,21 @@ We believe QView has become a significant and powerful tool for anyone looking t
     * `settings.json`: Your application settings (theme, link preferences).
     * `q_images/`: Directory for downloaded post images.
     * `linked_articles/`: Directory for downloaded HTML articles.
+
+## Post Data Source
+
+QView does not include the Q post dataset (`posts.url-normalized.json`) by default due to size and licensing considerations.
+
+You have two options of obtaining the post data:
+
+1. **Use a scraper or archive:**
+   - Several public sources exist where Q posts have been archived in JSON format.
+   - One such archive was maintained by [jkingsman/JSON-QAnon](https://github.com/jkingsman/JSON-QAnon).
+
+2. **Normalize your own data (Recommended):**
+   - A script (`normalize_posts.py`) will be added soon to convert external JSON formats into QView’s required structure.
+   - This lets you keep full control of your data structure and attribution.
+
 
 ## Basic Usage Guide
 
@@ -105,3 +123,7 @@ We genuinely believe QView provides a substantial toolkit for anyone studying th
 * Development of a standalone installer for easier distribution.
 * Ongoing performance enhancements.
 * Exploration of a mobile-friendly version (a longer-term aspiration).
+
+
+Credits- Q post content originally scraped from now-defunct public sites. Formatting and structure provided by the QView project.
+Special thanks to jkingsman/JSON-QAnon for academic collation work.
