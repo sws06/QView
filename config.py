@@ -35,6 +35,10 @@ BOOKMARKS_FILE_PATH = os.path.join(USER_DATA_ROOT, "q_gui_bookmarks.dat")
 SETTINGS_FILE_PATH = os.path.join(USER_DATA_ROOT, "settings.json")
 USER_NOTES_FILE_PATH = os.path.join(USER_DATA_ROOT, "user_notes.json")
 
+# QView Standardized Core Data File
+QVIEW_CORE_DATA_FILENAME = "qview_core_data.json"
+QVIEW_CORE_DATA_PATH = os.path.join(USER_DATA_ROOT, QVIEW_CORE_DATA_FILENAME)
+
 IMAGE_DIR_NAME = "q_images"  # Just the name, not used for full path construction here
 IMAGE_DIR = os.path.join(USER_DATA_ROOT, IMAGE_DIR_NAME)  # Full path
 
