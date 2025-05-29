@@ -79,6 +79,17 @@ class QPostViewer:
         self.root = root
         self.root.title("QView")
 
+        try:
+            # Assuming qview_icon.ico is directly in the APP_ROOT_DIR
+            icon_path = os.path.join(config.APP_ROOT_DIR, "qview_icon.ico") 
+            
+            if os.path.exists(icon_path): # Use the icon_path variable
+                self.root.iconbitmap(icon_path) # Use the icon_path variable
+            else:
+                print(f"Warning: Icon file not found at {icon_path}")
+        except Exception as e:
+            print(f"Error setting icon: {e}")
+
         window_width = 1024
         window_height = 720
         screen_width = self.root.winfo_screenwidth()
