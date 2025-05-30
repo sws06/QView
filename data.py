@@ -1,8 +1,9 @@
 # --- START DATA_PY_HEADER ---
 import os
-import sys # <--- ADD THIS LINE
+import re
+
+import demjson3 as demjson
 import pandas as pd
-import json
 
 import config  # For POSTS_DATA_PATH, DATAFRAME_PICKLE_PATH
 import utils  # For tag_post_with_themes
@@ -13,180 +14,175 @@ import utils  # For tag_post_with_themes
 # --- START LOAD_OR_PARSE_DATA ---
 def load_or_parse_data():
     df = None
-    # 1. Try to load the DataFrame from the pickle file first for speed
     if os.path.exists(config.DATAFRAME_PICKLE_PATH):
         try:
             print(f"Loading DataFrame from {config.DATAFRAME_PICKLE_PATH}...")
             df = pd.read_pickle(config.DATAFRAME_PICKLE_PATH)
-            print("DataFrame loaded successfully from pickle.")
-
-            # Basic validation of the pickled DataFrame
-            required_cols = ['postNumber', 'text', 'timestamp', 'datetime_utc_str', 'images', 'references']
-            if not all(col in df.columns for col in required_cols) or \
-               ('timestamp' in df.columns and df['timestamp'].isna().all()): # Check if a key column like timestamp is all NaN
-                print("Pickled DataFrame missing essential columns or key data is invalid. Re-processing.")
-                df = None # Force re-processing
+            print("DataFrame loaded successfully.")
+            required_cols = [
+                "Post Number",
+                "Text",
+                "Timestamp",
+                "Datetime_UTC",
+                "ImagesJSON",
+            ]
+            if not all(col in df.columns for col in required_cols) or (
+                "Datetime_UTC" in df.columns and df["Datetime_UTC"].isna().all()
+            ):
+                print(
+                    "Pickle missing essential columns or Datetime_UTC is invalid. Re-parsing."
+                )
+                df = None
 
             pickle_modified_during_load = False
             if df is not None:
-                # Ensure 'Themes' column exists (might have been added in later versions)
-                if 'Themes' not in df.columns:
-                    print("Adding 'Themes' column to loaded DataFrame from pickle.")
-                    if 'text' in df.columns: # Ensure 'text' field (new name) exists
-                        df['Themes'] = df['text'].apply(utils.tag_post_with_themes)
-                    else: # Fallback if 'text' is somehow missing
-                        df['Themes'] = pd.Series([[] for _ in range(len(df))], index=df.index)
-                    pickle_modified_during_load = True
-                
-                # Ensure 'Referenced Posts Display' column exists
-                if 'Referenced Posts Display' not in df.columns:
-                    print("Adding 'Referenced Posts Display' column to loaded DataFrame from pickle.")
-                    if 'references' in df.columns: # New key name for references
-                        def fmt_refs_from_new_format(refs_list):
-                            if isinstance(refs_list, list) and refs_list:
-                                return ", ".join([f"{r.get('id', '')} ('{str(r.get('snippet', ''))[:30]}...')" for r in refs_list if isinstance(r, dict)])
-                            return ""
-                        df['Referenced Posts Display'] = df['references'].apply(fmt_refs_from_new_format)
+                if "Themes" not in df.columns:
+                    print("Adding 'Themes' column to loaded DataFrame.")
+                    if "Text" in df.columns:
+                        df["Themes"] = df["Text"].apply(utils.tag_post_with_themes)
                     else:
-                        df['Referenced Posts Display'] = "" # Fallback
+                        df["Themes"] = pd.Series(
+                            [[] for _ in range(len(df))], index=df.index
+                        )
                     pickle_modified_during_load = True
+                if "ImagesJSON" not in df.columns:
+                    print(
+                        "Pickle loaded without 'ImagesJSON'. Forcing re-parse to get ImagesJSON correctly."
+                    )
+                    df = None
+                    pickle_modified_during_load = False  # Reset as df is None
+                if df is not None and "Referenced Posts Raw" not in df.columns:
+                    df["Referenced Posts Raw"] = pd.Series(dtype="object")
+                    pickle_modified_during_load = True
+                if df is not None and "Referenced Posts Display" not in df.columns:
+                    if "Referenced Posts Raw" in df.columns:
 
-                if pickle_modified_during_load:
+                        def fmt_refs_temp(refs):
+                            if isinstance(refs, list) and refs:
+                                return ", ".join(
+                                    [
+                                        f"{r.get('reference', '')} ('{str(r.get('text', ''))[:30]}...')"
+                                        for r in refs
+                                        if isinstance(r, dict)
+                                    ]
+                                )
+                            return ""
+
+                        df["Referenced Posts Display"] = df[
+                            "Referenced Posts Raw"
+                        ].apply(fmt_refs_temp)
+                        pickle_modified_during_load = True
+
+                if pickle_modified_during_load and df is not None:
                     try:
                         df.to_pickle(config.DATAFRAME_PICKLE_PATH)
-                        print("DataFrame re-saved to pickle with added/updated columns.")
+                        print("DataFrame re-saved with added columns.")
                     except Exception as e:
-                        print(f"Error re-saving DataFrame to pickle after adding columns: {e}")
-            return df # Return the DataFrame loaded from pickle
+                        print(f"Error re-saving DataFrame after adding columns: {e}")
 
         except Exception as e:
-            print(f"Error loading DataFrame from pickle: {e}. Will try to parse JSON files.")
-            df = None # Reset df if pickle loading failed
+            print(
+                f"Error loading DataFrame from pickle: {e}. Will try to parse JSON file."
+            )
+            df = None
 
-    # 2. If pickle not loaded, try to parse the new QView standard JSON format
-    if df is None and hasattr(config, 'QVIEW_CORE_DATA_PATH') and os.path.exists(config.QVIEW_CORE_DATA_PATH):
-        print(f"Parsing QView standard data from {config.QVIEW_CORE_DATA_PATH}...")
+    if df is None:
+        print(f"Parsing Q posts from {config.POSTS_DATA_PATH}...")
         try:
-            with open(config.QVIEW_CORE_DATA_PATH, 'r', encoding='utf-8') as f:
-                data_list = json.load(f) # Standard json.load for our new format
+            with open(config.POSTS_DATA_PATH, "r", encoding="utf-8") as f:
+                file_content = f.read()
+            data_json = demjson.decode(
+                file_content
+            )  # Renamed to avoid conflict with module name
 
-            if not isinstance(data_list, list):
-                print(f"Error: {config.QVIEW_CORE_DATA_FILENAME} does not contain a list of posts."); return None
-            
+            if "posts" not in data_json or not isinstance(data_json["posts"], list):
+                print("Decoded data does not contain 'posts' list.")
+                return None
             all_posts_data = []
-            for post_obj in data_list:
-                # Directly use the fields from our defined structure
-                # Add any simple transformations if needed, though most should be in the conversion script
-                all_posts_data.append({
-                    'Post Number': post_obj.get('postNumber'),
-                    'Timestamp': post_obj.get('timestamp'), # This will be used for Datetime_UTC
-                    # 'datetime_utc_str': post_obj.get('datetime_utc_str'), # Already a string, can be kept or regenerated
-                    'Author': post_obj.get('author'),
-                    'Tripcode': post_obj.get('tripcode'),
-                    'Text': post_obj.get('text', ""), # Ensure default for text
-                    'ImagesJSON': post_obj.get('images', []), # Map to existing 'ImagesJSON' for compatibility with image display
-                    'Image Count': len(post_obj.get('images', [])),
-                    'Link': post_obj.get('sourceLink'),
-                    'Site': post_obj.get('sourceSite'),
-                    'Board': post_obj.get('sourceBoard'),
-                    'Referenced Posts Raw': post_obj.get('references', []) # Map to existing 'Referenced Posts Raw'
-                })
-            
+            for i, post_obj in enumerate(data_json["posts"]):
+                metadata = post_obj.get("post_metadata", {})
+                text_content = post_obj.get("text", "")
+                post_num_raw = metadata.get("id", i + 1)
+                post_num_cleaned = post_num_raw
+                if isinstance(post_num_raw, str):
+                    num_match = re.match(r"(\d+)", post_num_raw)
+                    if num_match:
+                        post_num_cleaned = int(num_match.group(1))
+                all_posts_data.append(
+                    {
+                        "Author": metadata.get("author"),
+                        "Tripcode": metadata.get("tripcode"),
+                        "Site": metadata.get("source", {}).get("site"),
+                        "Board": metadata.get("source", {}).get("board"),
+                        "Link": metadata.get("source", {}).get("link"),
+                        "Timestamp": metadata.get("time"),
+                        "Post Number Raw": post_num_raw,
+                        "Post Number": post_num_cleaned,
+                        "Author ID": metadata.get("author_id"),
+                        "Text": text_content,
+                        "Referenced Posts Raw": post_obj.get("referenced_posts"),
+                        "Image Count": len(post_obj.get("images", [])),
+                        "ImagesJSON": post_obj.get("images", []),
+                    }
+                )
             if not all_posts_data:
-                print("No post data extracted from QView core data file.")
-                return pd.DataFrame() # Return empty DataFrame
-
+                return pd.DataFrame()
             df = pd.DataFrame(all_posts_data)
-            # --- Process DataFrame (common logic) ---
-            if 'Timestamp' in df.columns:
-                df['Timestamp'] = pd.to_numeric(df['Timestamp'], errors='coerce')
-                df.dropna(subset=['Timestamp'], inplace=True) # Critical for date conversion
-                df['Datetime_UTC'] = pd.to_datetime(df['Timestamp'], unit='s', utc=True)
-                df.sort_values(by='Datetime_UTC', inplace=True, ignore_index=True) # Sort by actual datetime
+            if "Timestamp" in df.columns:
+                df["Timestamp"] = pd.to_numeric(df["Timestamp"], errors="coerce")
+                df.dropna(subset=["Timestamp"], inplace=True)
+                df["Datetime_UTC"] = pd.to_datetime(df["Timestamp"], unit="s", utc=True)
+                df.sort_values(by="Datetime_UTC", inplace=True, ignore_index=True)
             else:
-                df['Datetime_UTC'] = pd.NaT # Ensure column exists even if timestamp was missing
+                df["Datetime_UTC"] = pd.NaT
+            if "Post Number" in df.columns:
+                df["Post Number"] = pd.to_numeric(
+                    df["Post Number"], errors="coerce"
+                ).astype("Int64")
+            if "Text" not in df.columns:
+                df["Text"] = ""
+            df["Themes"] = df["Text"].apply(
+                utils.tag_post_with_themes
+            )  # Use utils.tag_post_with_themes
+            if "Referenced Posts Raw" not in df.columns:
+                df["Referenced Posts Raw"] = pd.Series(dtype="object")
 
-            if 'Post Number' in df.columns:
-                df['Post Number'] = pd.to_numeric(df['Post Number'], errors='coerce').astype('Int64')
-            
-            if 'Text' not in df.columns: df['Text'] = "" # Ensure Text column exists
-            df['Themes'] = df['Text'].apply(utils.tag_post_with_themes)
-
-            if 'Referenced Posts Raw' not in df.columns: df['Referenced Posts Raw'] = pd.Series(dtype='object')
-            def fmt_refs(refs_list):
-                if isinstance(refs_list, list) and refs_list:
-                    return ", ".join([f"{r.get('id', '')} ('{str(r.get('snippet', ''))[:30]}...')" for r in refs_list if isinstance(r, dict)])
+            def fmt_refs(refs):
+                if isinstance(refs, list) and refs:
+                    return ", ".join(
+                        [
+                            f"{r.get('reference', '')} ('{str(r.get('text', ''))[:30]}...')"
+                            for r in refs
+                            if isinstance(r, dict)
+                        ]
+                    )
                 return ""
-            df['Referenced Posts Display'] = df['Referenced Posts Raw'].apply(fmt_refs)
 
-            if 'ImagesJSON' not in df.columns: df['ImagesJSON'] = pd.Series([[] for _ in range(len(df))], index=df.index)
-            # --- End Process DataFrame ---
+            df["Referenced Posts Display"] = df["Referenced Posts Raw"].apply(fmt_refs)
+            if "ImagesJSON" not in df.columns:
+                df["ImagesJSON"] = pd.Series(
+                    [[] for _ in range(len(df))], index=df.index
+                )
 
             df.to_pickle(config.DATAFRAME_PICKLE_PATH)
-            print(f"DataFrame created from {config.QVIEW_CORE_DATA_FILENAME} and saved to pickle.")
-            return df
-
+            print("DataFrame parsed and saved to pickle.")
         except Exception as e:
-            print(f"Error parsing {config.QVIEW_CORE_DATA_FILENAME} or saving pickle: {e}")
-            import traceback; traceback.print_exc()
-            df = None # Ensure df is None if this step fails
+            print(f"Error parsing JSON or saving pickle: {e}")
+            import traceback
 
-    # 3. If QView core data not found, try to find original and convert
-    if df is None and os.path.exists(config.POSTS_DATA_PATH):
-        print(f"QView core data file not found. Original '{os.path.basename(config.POSTS_DATA_PATH)}' found.")
-        from tkinter import messagebox # Local import for UI element
-        
-        # Check if convert_data.py exists
-        convert_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "convert_data.py") # Assuming convert_data.py is in root
-        if not os.path.exists(convert_script_path):
-             # Try another common location relative to current file if data.py is in a subdir
-             convert_script_path_alt = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0] if hasattr(sys, 'argv') else __file__)), "convert_data.py")
-             if os.path.exists(convert_script_path_alt):
-                 convert_script_path = convert_script_path_alt
-             else:
-                 messagebox.showerror("Conversion Error", f"convert_data.py not found. Please place it in the QView root directory and restart.")
-                 return None
-
-
-        messagebox.showinfo("Data Conversion Required",
-                            f"QView needs to convert your '{os.path.basename(config.POSTS_DATA_PATH)}' file "
-                            f"into its standard format ('{config.QVIEW_CORE_DATA_FILENAME}').\n\n"
-                            "This is a one-time process and may take a few moments.\n"
-                            "Click OK to proceed.",
-                            parent=None) # No parent for early stage messagebox
-        try:
-            import convert_data # Assumes convert_data.py is in the same directory or Python path
-            if convert_data.convert_to_qview_format(config.POSTS_DATA_PATH, config.QVIEW_CORE_DATA_PATH):
-                print("Conversion successful. Attempting to load new data file...")
-                # Call self recursively to now load the newly created qview_core_data.json
-                return load_or_parse_data() 
-            else:
-                messagebox.showerror("Conversion Failed",
-                                     "Automatic data conversion failed. Please check the console output.\n"
-                                     f"You may need to run 'python convert_data.py' manually from the QView directory.",
-                                     parent=None)
-                return None
-        except ImportError:
-            messagebox.showerror("Conversion Error",
-                                 f"Could not import 'convert_data.py'. Make sure it's in the QView directory.\n"
-                                 "You may need to run 'python convert_data.py' manually.",
-                                 parent=None)
-            return None
-        except Exception as e_convert:
-            messagebox.showerror("Conversion Failed",
-                                 f"An error occurred during automatic data conversion: {e_convert}\n"
-                                 "Please check the console output or run 'python convert_data.py' manually.",
-                                 parent=None)
+            traceback.print_exc()
             return None
 
-    # 4. If no data files are found at all
-    if df is None:
-        from tkinter import messagebox # Ensure messagebox is available
-        messagebox.showerror("Data Error",
-                             f"No data file found. Please ensure either '{config.QVIEW_CORE_DATA_FILENAME}' (in user_data) "
-                             f"or '{os.path.basename(config.POSTS_DATA_PATH)}' (in the application root) is present.",
-                             parent=None)
+    if df is None or df.empty:
         return None
+    if "Datetime_UTC" not in df.columns:
+        df["Datetime_UTC"] = pd.NaT
+    if "ImagesJSON" not in df.columns:
+        print(
+            "Critical: 'ImagesJSON' column still missing after load/parse attempt. Adding empty."
+        )
+        df["ImagesJSON"] = pd.Series([[] for _ in range(len(df))], index=df.index)
+    return df
 
-    return df # Should ideally be populated by one of the above paths
+
 # --- END LOAD_OR_PARSE_DATA ---
