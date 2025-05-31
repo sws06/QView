@@ -18,7 +18,7 @@ else:
 
 # Raw data file (typically shipped with the app or in a 'data' subfolder)
 # For now, assume it's at the APP_ROOT_DIR. Consider moving to APP_ROOT_DIR/data/
-POSTS_DATA_PATH = os.path.join(APP_ROOT_DIR, "posts.url-normalized.json")
+POSTS_DATA_PATH = os.path.join(APP_ROOT_DIR, "data", "qview_posts_data.json")
 
 # User-specific data, downloaded content, and generated files
 USER_DATA_ROOT = os.path.join(APP_ROOT_DIR, "user_data")
