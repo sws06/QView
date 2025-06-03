@@ -97,13 +97,22 @@ def convert_post_data():
         if original_references_data and isinstance(original_references_data, list):
             for ref_data in original_references_data:
                 if isinstance(ref_data, dict):
-                    new_references_list.append({
+                    new_ref_object = {
                         "referenceID": ref_data.get("reference"),
-                        "referencedPostAuthorID": ref_data.get("author_id"), # Author ID of the one who made the referenced post
-                        "textContent": ref_data.get("text")
-                        # Note: We are NOT processing ref_data.get("images", []) here.
-                        # Those images belong to the referenced post, not the referencing post.
-                    })
+                        "referencedPostAuthorID": ref_data.get("author_id"),
+                        "textContent": ref_data.get("text"),
+                        "images": [] # Initialize as empty list for images within this specific quote
+                    }
+                    # Now, process images if present in ref_data (for this specific quoted post)
+                    original_ref_images = ref_data.get("images", []) # Get images from the current ref_data
+                    if original_ref_images and isinstance(original_ref_images, list):
+                        for ref_img_data in original_ref_images:
+                            if isinstance(ref_img_data, dict):
+                                new_ref_object["images"].append({
+                                    "filename": ref_img_data.get("file"), # Should map to "file" from original
+                                    "originalName": ref_img_data.get("name")  # Should map to "name" from original
+                                })
+                    new_references_list.append(new_ref_object)
         new_post_object["referencedPosts"] = new_references_list
         
         # Ensure all keys from our defined structure are present, even if null

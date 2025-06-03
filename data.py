@@ -86,13 +86,19 @@ def load_or_parse_data():
                     # "reference", "author_id", "text".
                     # Our new format has "referenceID", "referencedPostAuthorID", "textContent".
                     "Referenced Posts Raw": [
-                        {
-                            "reference": ref.get("referenceID"),
-                            "author_id": ref.get("referencedPostAuthorID"),
-                            "text": ref.get("textContent")
-                        }
-                        for ref in post_obj.get("referencedPosts", []) if isinstance(ref, dict)
-                    ],
+                    {
+                        "reference": ref.get("referenceID"),
+                        "author_id": ref.get("referencedPostAuthorID"),
+                        "text": ref.get("textContent"),
+                        # Add the images from the referenced post object in the JSON
+                        # Ensure the structure matches what gui.py will expect later (file, name)
+                        "images": [
+                            {"file": img.get("filename"), "name": img.get("originalName")}
+                            for img in ref.get("images", []) if isinstance(img, dict)
+                        ] if ref.get("images") else [] # Add images if they exist in the ref object
+                    }
+                    for ref in post_obj.get("referencedPosts", []) if isinstance(ref, dict)
+                ],
                     # "Image Count" will be derived after DataFrame creation
                 })
 
