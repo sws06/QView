@@ -1,4 +1,5 @@
 # --- START UTILS_PY_HEADER ---
+
 import html
 import json  # Added for user notes
 import os
@@ -8,16 +9,18 @@ import re
 import shutil
 import subprocess
 import webbrowser
-from tkinter import messagebox  # For open_chrome_incognito error
-
+import time
+import requests
 import pandas as pd
-
 import config  # For THEMES, URL_REGEX (used by format_cell_text_for_gui_html)
+from tkinter import messagebox  # For open_chrome_incognito error
+from urllib.parse import urlparse
 
 # --- END UTILS_PY_HEADER ---
 
 
 # --- START TERM_COLORS_CLASS ---
+
 class TermColors:
     RESET = "\033[0m"
     BOLD = "\033[1m"
@@ -29,11 +32,11 @@ class TermColors:
     GREEN = "\033[92m"
     CYAN = "\033[96m"
 
-
 # --- END TERM_COLORS_CLASS ---
 
 
 # --- START THEME_TAGGING ---
+
 def tag_post_with_themes(post_text):
     if not isinstance(post_text, str) or not post_text.strip():
         return []
@@ -46,11 +49,10 @@ def tag_post_with_themes(post_text):
                 break
     return sorted(list(found_themes))
 
-
 # --- END THEME_TAGGING ---
 
-
 # --- START CHROME_LAUNCHER ---
+
 def get_chrome_path_windows():
     try:
         import winreg
@@ -145,11 +147,11 @@ def open_link_with_preference(url, app_settings):
     else:  # "default" or any other unknown preference
         webbrowser.open_new_tab(url)
 
-
 # --- END CHROME_LAUNCHER ---
 
 
 # --- START BOOKMARK_FILE_OPERATIONS ---
+
 def load_bookmarks_from_file(filepath):
     try:
         if os.path.exists(filepath):
@@ -170,11 +172,11 @@ def save_bookmarks_to_file(bookmarks_set, filepath):
     except Exception as e:
         print(f"Could not save bookmarks to {filepath}: {e}")
 
-
 # --- END BOOKMARK_FILE_OPERATIONS ---
 
 
 # --- START USER_NOTES_OPERATIONS ---
+
 def load_user_notes(filepath):
     """Loads user notes from a JSON file."""
     try:
@@ -202,11 +204,11 @@ def save_user_notes(notes_dict, filepath):
     except (IOError, Exception) as e:
         print(f"Could not save user notes to {filepath}: {e}")
 
-
 # --- END USER_NOTES_OPERATIONS ---
 
 
 # --- START TEXT_SANITIZATION ---
+
 def sanitize_text_for_tkinter(text_content):
     if not isinstance(text_content, str):
         return str(text_content)
@@ -220,21 +222,21 @@ def sanitize_text_for_tkinter(text_content):
             temp_sane_list.append(char_val)
     return "".join(temp_sane_list)
 
-
 # --- END TEXT_SANITIZATION ---
 
 
 # --- START URL_EXTRACTION ---
+
 def _extract_urls_from_text(text_content):
     if not isinstance(text_content, str):
         return []
     return [match.group(0) for match in config.URL_REGEX.finditer(text_content)]
 
-
 # --- END URL_EXTRACTION ---
 
 
 # --- START HTML_EXPORT_FORMATTING ---
+
 def format_cell_text_for_gui_html(cell_text):
     if not isinstance(cell_text, str):
         return ""
@@ -251,11 +253,11 @@ def format_cell_text_for_gui_html(cell_text):
     parts.append(html.escape(cell_text[last_end:]))
     return "".join(parts).replace("\n", "<br />\n")
 
-
 # --- END HTML_EXPORT_FORMATTING ---
 
 
 # --- START IMAGE_OPENING ---
+
 from PIL import Image, ImageTk # Ensure ImageTk is imported
 
 def get_or_create_thumbnail(original_image_path, thumbnail_cache_dir, size=(300, 300)):
@@ -328,23 +330,14 @@ def open_image_external(image_path, root_for_messagebox=None):
             messagebox.showerror("Image Error", f"Could not open image:\n{image_path}\n\n{e}", parent=root_for_messagebox)
         else:
             messagebox.showerror("Image Error", f"Could not open image:\n{image_path}\n\n{e}")
+
 # --- END IMAGE_OPENING ---
 
-import os
-import re
-import time
-from urllib.parse import urlparse
-
-import pandas as pd
 
 # --- START ARTICLE_DOWNLOADING_UTILS ---
-import requests
-
-import config  # Ensure config is imported for this block
 
 # LINKED_ARTICLES_DIR is now directly defined in config.py as a full path.
 # We will use config.LINKED_ARTICLES_DIR directly in functions below.
-
 
 def get_domain(url):
     """Extracts the domain name (e.g., 'example.com') from a URL."""
@@ -606,6 +599,100 @@ def download_all_post_images_util(df_all_posts, status_callback=None):
     final_summary = f"Image download finished. New: {total_images_downloaded}, Skipped: {total_images_skipped}, Errors: {image_error_count}."
     print(f"\n{final_summary}")
     if status_callback:
+        status_callback(final_summary)
+
+    # Add this new function (you can place it near download_all_post_images_util):
+import time # Ensure time is imported if not already at the top of utils.py
+import requests # Ensure requests is imported
+
+def download_all_quoted_images_util(df_all_posts, status_callback=None):
+    """
+    Downloads images found within quoted posts from the DataFrame.
+    """
+    if status_callback:
+        status_callback("Preparing to download quoted images...")
+    os.makedirs(config.IMAGE_DIR, exist_ok=True) # Ensure image directory exists
+    print(f"Starting quoted image scan. Saving to: {config.IMAGE_DIR}") #
+
+    total_images_downloaded = 0
+    total_images_skipped = 0
+    image_error_count = 0
+    posts_processed = 0
+    total_posts_to_scan = len(df_all_posts)
+
+    for index, post_series in df_all_posts.iterrows():
+        posts_processed += 1
+        # Update status less frequently for this more granular scan, or adjust as needed
+        if status_callback and posts_processed % 50 == 0:
+            status_callback(
+                f"Quoted Imgs Scan: Post {posts_processed}/{total_posts_to_scan}. New D:{total_images_downloaded}, Existing S:{total_images_skipped}, Err E:{image_error_count}"
+            )
+        if posts_processed % 200 == 0:
+            print(f"Processing Quoted Images for post {posts_processed}/{total_posts_to_scan}...")
+
+        referenced_posts_raw = post_series.get("Referenced Posts Raw", [])
+        if not referenced_posts_raw:
+            continue
+
+        for ref_data in referenced_posts_raw:
+            if not isinstance(ref_data, dict):
+                continue
+            
+            # 'images' key within each item of "Referenced Posts Raw"
+            quoted_images_metadata_list = ref_data.get("images", []) 
+            if not quoted_images_metadata_list or not isinstance(quoted_images_metadata_list, list):
+                continue
+
+            for img_meta in quoted_images_metadata_list: #
+                if not isinstance(img_meta, dict): #
+                    continue
+
+                img_filename_from_quote = img_meta.get("file") #
+                if not img_filename_from_quote: #
+                    continue
+                
+                # --- MODIFICATION FOR URL CONSTRUCTION ---
+                image_url = ""
+                # For quoted images, use the specific path structure observed from qanon.pub
+                if not img_filename_from_quote.startswith(("http://", "https://")):
+                    # Use the corrected base URL structure for these qanon.pub hosted quoted images
+                    image_url = "https://www.qanon.pub/data/media/" + img_filename_from_quote
+                else:
+                    # If img_filename_from_quote is already a full URL, use it directly
+                    image_url = img_filename_from_quote #
+                # --- END MODIFICATION ---
+                
+                sanitized_local_filename = sanitize_filename_component(os.path.basename(img_filename_from_quote)) #
+                local_image_path = os.path.join(config.IMAGE_DIR, sanitized_local_filename) #
+
+                if not os.path.exists(local_image_path): #
+                    time.sleep(0.1) #
+                    headers = { #
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                    }
+                    try:
+                        response = requests.get(image_url, stream=True, timeout=20, headers=headers) #
+                        response.raise_for_status() #
+
+                        with open(local_image_path, "wb") as f: #
+                            for chunk in response.iter_content(chunk_size=8192): #
+                                f.write(chunk)
+                        total_images_downloaded += 1 #
+                    except requests.exceptions.HTTPError as e: #
+                        print(f"    HTTP Error downloading Quoted Image {image_url}: {e.response.status_code}") #
+                        image_error_count += 1 #
+                    except requests.exceptions.RequestException as e: #
+                        print(f"    Error downloading Quoted Image {image_url}: {type(e).__name__}") #
+                        image_error_count += 1 #
+                    except Exception as e: #
+                        print(f"    An unexpected error occurred with Quoted Image {image_url}: {e}") #
+                        image_error_count += 1 #
+                else:
+                    total_images_skipped += 1 #
+    
+    final_summary = f"Quoted Image download finished. New: {total_images_downloaded}, Skipped (already exist): {total_images_skipped}, Errors: {image_error_count}." #
+    print(f"\n{final_summary}") #
+    if status_callback: #
         status_callback(final_summary)
 
 
