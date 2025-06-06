@@ -6,6 +6,9 @@ QView is a desktop application meticulously designed for exploring, searching, a
 
 We believe QView has become a significant and powerful tool for anyone looking to seriously engage with and understand this unique dataset.
 
+### 🔗 Discuss QView on XDA:
+[View the official XDA thread here](https://xdaforums.com/t/tool-win-qview-offline-q-drop-explorer-delta-search-archive-tool-dark-to-light.4742777/)
+
 ## Key Features
 
 **1. Data Loading & Rich Display:**
