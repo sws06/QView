@@ -7,6 +7,9 @@ __pycache__/
 posts.url-normalized.json
 patch_instructions.txt
 patcher.py
+/build/
+/dist/
+*.spec
 
 
 

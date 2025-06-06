@@ -1,3 +1,5 @@
+# config.py
+
 # --- START CONFIG_PY_HEADER ---
 # --- START FILE_PATHS_AND_DIRECTORIES ---
 import os
@@ -7,25 +9,45 @@ import sys
 # --- END CONFIG_PY_HEADER ---
 
 
+# --- MODIFIED APP_ROOT_DIR DEFINITION ---
 # Determine APP_ROOT_DIR dynamically
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     # If the application is run as a bundle (e.g., by PyInstaller)
-    # sys.executable is the path to the executable
-    APP_ROOT_DIR = os.path.dirname(sys.executable)
+    # sys._MEIPASS is the path to the temporary folder where files are unpacked.
+    # Based on your finding, PyInstaller is putting our data in an '_internal' subfolder here.
+    APP_ROOT_DIR = os.path.join(sys._MEIPASS, '_internal')
+    
+    # As a fallback, if the '_internal' folder doesn't exist for some reason,
+    # or for different PyInstaller versions, still check the base _MEIPASS path.
+    if not os.path.exists(os.path.join(APP_ROOT_DIR, 'data')):
+        APP_ROOT_DIR = sys._MEIPASS
 else:
     # If run as a normal script, __file__ is the path to config.py
-    APP_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+    APP_ROOT_DIR = os.path.dirname(os.path.abspath(__file__)) #
+# --- END MODIFIED APP_ROOT_DIR DEFINITION ---
 
 # Raw data file (typically shipped with the app or in a 'data' subfolder)
 # For now, assume it's at the APP_ROOT_DIR. Consider moving to APP_ROOT_DIR/data/
 POSTS_DATA_PATH = os.path.join(APP_ROOT_DIR, "data", "qview_posts_data.json")
 
 # User-specific data, downloaded content, and generated files
-USER_DATA_ROOT = os.path.join(APP_ROOT_DIR, "user_data")
+# --- MODIFIED USER_DATA_ROOT FOR PACKAGED APP ---
+# It's better for the packaged app to create user_data next to the .exe,
+# not inside the (potentially temporary or read-only) APP_ROOT_DIR.
+# We'll get the exe's directory instead of the temporary _MEIPASS directory.
+if getattr(sys, "frozen", False):
+    # If frozen, get the directory of the executable itself
+    EXE_DIR = os.path.dirname(sys.executable)
+    USER_DATA_ROOT = os.path.join(EXE_DIR, "user_data")
+else:
+    # If not frozen, use the original logic
+    USER_DATA_ROOT = os.path.join(APP_ROOT_DIR, "user_data") #
+# --- END MODIFIED USER_DATA_ROOT ---
+
 try:
-    os.makedirs(USER_DATA_ROOT, exist_ok=True)
+    os.makedirs(USER_DATA_ROOT, exist_ok=True) #
 except OSError as e:
-    print(f"Warning: Could not create user_data directory at {USER_DATA_ROOT}: {e}")
+    print(f"Warning: Could not create user_data directory at {USER_DATA_ROOT}: {e}") #
     # Fallback to APP_ROOT_DIR if user_data creation fails (e.g. permissions)
     USER_DATA_ROOT = APP_ROOT_DIR
 
@@ -216,7 +238,7 @@ EXCLUDED_LINK_DOMAINS = [
     "cloudfront.net",
 ]
 QANON_PUB_MEDIA_BASE_URL = (
-    "https://media.qanon.pub/media/"  # Base URL for images from qanon.pub
+    "https://www.qanon.pub/data/media/"  # Corrected base URL for images from qanon.pub
 )
 # --- END ARTICLE_DOWNLOAD_CONFIG ---
 
