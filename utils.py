@@ -1,7 +1,6 @@
 # --- START UTILS_PY_HEADER ---
-
 import html
-import json  # Added for user notes
+import json
 import os
 import pickle
 import platform
@@ -12,15 +11,14 @@ import webbrowser
 import time
 import requests
 import pandas as pd
-import config  # For THEMES, URL_REGEX (used by format_cell_text_for_gui_html)
-from tkinter import messagebox  # For open_chrome_incognito error
+from tkinter import messagebox
 from urllib.parse import urlparse
 
+import config
 # --- END UTILS_PY_HEADER ---
 
 
 # --- START TERM_COLORS_CLASS ---
-
 class TermColors:
     RESET = "\033[0m"
     BOLD = "\033[1m"
@@ -31,12 +29,10 @@ class TermColors:
     MAGENTA = "\033[95m"
     GREEN = "\033[92m"
     CYAN = "\033[96m"
-
 # --- END TERM_COLORS_CLASS ---
 
 
 # --- START THEME_TAGGING ---
-
 def tag_post_with_themes(post_text):
     if not isinstance(post_text, str) or not post_text.strip():
         return []
@@ -48,15 +44,13 @@ def tag_post_with_themes(post_text):
                 found_themes.add(theme)
                 break
     return sorted(list(found_themes))
-
 # --- END THEME_TAGGING ---
 
-# --- START CHROME_LAUNCHER ---
 
+# --- START CHROME_LAUNCHER ---
 def get_chrome_path_windows():
     try:
         import winreg
-
         try:
             key = winreg.OpenKey(
                 winreg.HKEY_LOCAL_MACHINE,
@@ -69,9 +63,9 @@ def get_chrome_path_windows():
         except FileNotFoundError:
             pass
         except Exception:
-            pass  # Ignore other registry errors
+            pass
     except ImportError:
-        pass  # winreg not available
+        pass
     env_vars = {
         "ProgramFiles": "C:\\Program Files",
         "ProgramFiles(x86)": "C:\\Program Files (x86)",
@@ -96,11 +90,10 @@ def get_chrome_path_windows():
             return path
     return shutil.which("chrome.exe") or shutil.which("chrome")
 
-
 def get_chrome_path():
     if platform.system() == "Windows":
         return get_chrome_path_windows()
-    elif platform.system() == "Darwin":  # macOS
+    elif platform.system() == "Darwin":
         default_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         if os.path.exists(default_path):
             return default_path
@@ -109,7 +102,7 @@ def get_chrome_path():
             or shutil.which("Google Chrome")
             or shutil.which("chrome")
         )
-    else:  # Linux and other OS
+    else:
         return (
             shutil.which("google-chrome")
             or shutil.which("chrome")
@@ -117,13 +110,10 @@ def get_chrome_path():
             or shutil.which("chromium")
         )
 
-
 CHROME_PATH = get_chrome_path()
-
 
 def open_chrome_incognito(url):
     if not CHROME_PATH:
-        # No messagebox here, just return False. Caller can decide to show error or fallback.
         print("Google Chrome path not found. Cannot open in incognito.")
         return False
     try:
@@ -131,27 +121,21 @@ def open_chrome_incognito(url):
         print(f"Attempting to open in Chrome Incognito: {url}")
         return True
     except Exception as e:
-        # No messagebox here.
         print(f"Failed to open in Chrome Incognito: {e}")
         return False
 
-
 def open_link_with_preference(url, app_settings):
-    """Opens a URL based on user preference in app_settings."""
     preference = app_settings.get("link_opening_preference", "default")
-
     if preference == "chrome_incognito":
-        if not open_chrome_incognito(url):  # Try Chrome Incognito
+        if not open_chrome_incognito(url):
             print("Falling back to system default browser.")
-            webbrowser.open_new_tab(url)  # Fallback if Chrome fails
-    else:  # "default" or any other unknown preference
+            webbrowser.open_new_tab(url)
+    else:
         webbrowser.open_new_tab(url)
-
 # --- END CHROME_LAUNCHER ---
 
 
 # --- START BOOKMARK_FILE_OPERATIONS ---
-
 def load_bookmarks_from_file(filepath):
     try:
         if os.path.exists(filepath):
@@ -163,7 +147,6 @@ def load_bookmarks_from_file(filepath):
         print(f"Could not load bookmarks from {filepath}: {e}. Starting empty.")
     return set()
 
-
 def save_bookmarks_to_file(bookmarks_set, filepath):
     try:
         with open(filepath, "wb") as f:
@@ -171,48 +154,36 @@ def save_bookmarks_to_file(bookmarks_set, filepath):
             print(f"Saved {len(bookmarks_set)} bookmarks to {filepath}")
     except Exception as e:
         print(f"Could not save bookmarks to {filepath}: {e}")
-
 # --- END BOOKMARK_FILE_OPERATIONS ---
 
 
 # --- START USER_NOTES_OPERATIONS ---
-
 def load_user_notes(filepath):
-    """Loads user notes from a JSON file."""
     try:
         if os.path.exists(filepath):
             with open(filepath, "r", encoding="utf-8") as f:
                 notes = json.load(f)
-                # Ensure keys are integers if they were saved from integer indices
-                # However, for consistency with how treeview iids are often strings,
-                # let's assume string keys for post original_df_index are fine.
-                # If original_df_index is always int, can convert keys back:
-                # return {int(k): v for k, v in notes.items()}
                 print(f"Loaded {len(notes)} user notes from {filepath}")
                 return notes
     except (json.JSONDecodeError, IOError, Exception) as e:
         print(f"Could not load user notes from {filepath}: {e}. Starting empty.")
     return {}
 
-
 def save_user_notes(notes_dict, filepath):
-    """Saves the user notes dictionary to a JSON file."""
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(notes_dict, f, indent=4)
             print(f"Saved {len(notes_dict)} user notes to {filepath}")
     except (IOError, Exception) as e:
         print(f"Could not save user notes to {filepath}: {e}")
-
 # --- END USER_NOTES_OPERATIONS ---
 
 
 # --- START TEXT_SANITIZATION ---
-
 def sanitize_text_for_tkinter(text_content):
     if not isinstance(text_content, str):
         return str(text_content)
-    sane_text = text_content.replace("\x00", "")  # Remove null characters
+    sane_text = text_content.replace("\x00", "")
     temp_sane_list = []
     for char_val in sane_text:
         char_ord = ord(char_val)
@@ -222,21 +193,25 @@ def sanitize_text_for_tkinter(text_content):
             temp_sane_list.append(char_val)
     return "".join(temp_sane_list)
 
+def sanitize_filename_component(component):
+    if component is None:
+        return "unknown_id"
+    sanitized = re.sub(r'[<>:"/\\|?*]', "_", str(component))
+    sanitized = re.sub(r"__+", "_", sanitized)
+    sanitized = sanitized.strip("_.")
+    return sanitized[:100] if sanitized else "sanitized_empty"
 # --- END TEXT_SANITIZATION ---
 
 
 # --- START URL_EXTRACTION ---
-
 def _extract_urls_from_text(text_content):
     if not isinstance(text_content, str):
         return []
     return [match.group(0) for match in config.URL_REGEX.finditer(text_content)]
-
 # --- END URL_EXTRACTION ---
 
 
 # --- START HTML_EXPORT_FORMATTING ---
-
 def format_cell_text_for_gui_html(cell_text):
     if not isinstance(cell_text, str):
         return ""
@@ -252,22 +227,14 @@ def format_cell_text_for_gui_html(cell_text):
         last_end = end
     parts.append(html.escape(cell_text[last_end:]))
     return "".join(parts).replace("\n", "<br />\n")
-
 # --- END HTML_EXPORT_FORMATTING ---
 
 
 # --- START IMAGE_OPENING ---
-
-from PIL import Image, ImageTk # Ensure ImageTk is imported
+from PIL import Image, ImageTk
 
 def get_or_create_thumbnail(original_image_path, thumbnail_cache_dir, size=(300, 300)):
-    """
-    Loads a thumbnail from cache or creates it from the original image.
-    Saves the created thumbnail to the cache.
-    Returns an ImageTk.PhotoImage object or None.
-    """
     if not os.path.exists(original_image_path):
-        # print(f"Original image not found: {original_image_path}")
         return None
 
     original_filename = os.path.basename(original_image_path)
@@ -276,33 +243,22 @@ def get_or_create_thumbnail(original_image_path, thumbnail_cache_dir, size=(300,
 
     try:
         if os.path.exists(thumbnail_path):
-            # Load from cache
             img_pil = Image.open(thumbnail_path)
-            # print(f"Loaded thumbnail from cache: {thumbnail_path}")
         else:
-            # Create thumbnail and save to cache
             img_pil = Image.open(original_image_path)
-            img_pil.thumbnail(size, Image.Resampling.LANCZOS) # Use LANCZOS for better quality resize
-            os.makedirs(thumbnail_cache_dir, exist_ok=True) # Ensure cache dir exists
+            img_pil.thumbnail(size, Image.Resampling.LANCZOS)
+            os.makedirs(thumbnail_cache_dir, exist_ok=True)
             img_pil.save(thumbnail_path)
-            # print(f"Created and cached thumbnail: {thumbnail_path}")
         
-        # Ensure image is in a mode compatible with PhotoImage (e.g., RGB, RGBA)
         if img_pil.mode not in ("RGB", "RGBA"):
             img_pil = img_pil.convert("RGBA")
             
         photo = ImageTk.PhotoImage(img_pil)
         return photo
-    except FileNotFoundError: # Should be caught by the initial exists check, but as a safeguard
-        print(f"Error (FNF): Original image not found during thumbnail processing: {original_image_path}")
-        return None
     except Exception as e:
         print(f"Error processing thumbnail for {original_image_path}: {e}")
-        # Optionally, try to delete a corrupted cached thumbnail if loading it failed
         if os.path.exists(thumbnail_path):
             try:
-                # Check if the error was during loading an existing thumbnail
-                # This is a simple check; more robust would be to flag if it's post-Image.open(thumbnail_path)
                 if 'cannot identify image file' in str(e).lower() or 'decoder' in str(e).lower():
                      print(f"Deleting potentially corrupted thumbnail: {thumbnail_path}")
                      os.remove(thumbnail_path)
@@ -316,13 +272,8 @@ def open_image_external(image_path, root_for_messagebox=None):
         if platform.system() == "Windows":
             os.startfile(abs_path)
         else:
-            if platform.system() == "Darwin": # macOS
-                subprocess.call(["open", abs_path])
-            else: # Linux and other OS
-                try:
-                    subprocess.call(["xdg-open", abs_path])
-                except FileNotFoundError: # Fallback if xdg-open is not available
-                    webbrowser.open(f"file://{abs_path}")
+            opener = "open" if platform.system() == "Darwin" else "xdg-open"
+            subprocess.call([opener, abs_path])
         print(f"Attempting to open image externally: {abs_path}")
     except Exception as e:
         print(f"Error opening image {image_path} externally: {e}")
@@ -330,15 +281,10 @@ def open_image_external(image_path, root_for_messagebox=None):
             messagebox.showerror("Image Error", f"Could not open image:\n{image_path}\n\n{e}", parent=root_for_messagebox)
         else:
             messagebox.showerror("Image Error", f"Could not open image:\n{image_path}\n\n{e}")
-
 # --- END IMAGE_OPENING ---
 
 
 # --- START ARTICLE_DOWNLOADING_UTILS ---
-
-# LINKED_ARTICLES_DIR is now directly defined in config.py as a full path.
-# We will use config.LINKED_ARTICLES_DIR directly in functions below.
-
 def get_domain(url):
     """Extracts the domain name (e.g., 'example.com') from a URL."""
     try:
@@ -350,7 +296,6 @@ def get_domain(url):
     except Exception:
         return None
 
-
 def is_excluded_domain(url, excluded_list):
     """Checks if the URL's domain is in the excluded list."""
     domain = get_domain(url)
@@ -359,7 +304,6 @@ def is_excluded_domain(url, excluded_list):
             if domain == excluded_domain or domain.endswith("." + excluded_domain):
                 return True
     return False
-
 
 def sanitize_filename_component(component):
     """Sanitizes a string component for use in a filename."""
@@ -370,330 +314,150 @@ def sanitize_filename_component(component):
     sanitized = sanitized.strip("_.")
     return sanitized[:100] if sanitized else "sanitized_empty"
 
-
 def generate_article_filename(post_id_str, url):
-    """
-    Generates a filename for a downloaded article.
-    Format: postID-domain.html
-    """
-    domain = get_domain(url)
-    if not domain:
-        domain = "unknown_domain"
-
+    """Generates a filename for a downloaded article."""
+    domain = get_domain(url) or "unknown_domain"
     safe_post_id = sanitize_filename_component(post_id_str)
     safe_domain = sanitize_filename_component(domain)
-
     return f"{safe_post_id}-{safe_domain}.html"
 
-
 def check_article_exists_util(post_id_str, url):
-    """
-    Checks if a downloaded article HTML file exists for a given post ID and URL.
-    Returns (bool_exists, str_filepath_or_None).
-    """
+    """Checks if a downloaded article HTML file exists for a given post ID and URL."""
     article_filename = generate_article_filename(post_id_str, url)
     filepath = os.path.join(config.LINKED_ARTICLES_DIR, article_filename)
     return os.path.exists(filepath), filepath
 
-
 def download_article_util(url, filepath):
-    """
-    Downloads the HTML content of a URL and saves it to filepath.
-    Returns (bool_success, str_error_message_or_None).
-    """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
+    """Downloads the HTML content of a URL and saves it to filepath."""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
     try:
         response = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
         response.raise_for_status()
-
         content_type = response.headers.get("content-type", "").lower()
         if "html" not in content_type:
             return False, f"Skipped (not HTML): {content_type[:50]}"
-
         with open(filepath, "w", encoding="utf-8", errors="replace") as f:
             f.write(response.text)
         return True, None
-    except requests.exceptions.HTTPError as e:
-        return False, f"HTTP error {e.response.status_code}"
-    except requests.exceptions.ConnectionError:
-        return False, "Connection error"
-    except requests.exceptions.Timeout:
-        return False, "Timeout"
-    except requests.exceptions.RequestException as e:
-        return False, f"Request error: {type(e).__name__}"
-    except IOError as e:
-        return False, f"File save error: {type(e).__name__}"
     except Exception as e:
-        return False, f"Unexpected error: {type(e).__name__}"
+        return False, f"Error: {type(e).__name__}"
 
-
-def scan_and_download_all_articles_util(df_all_posts, status_callback=None):
-    """
-    Scans all posts, filters links, and downloads articles if they don't already exist.
-    """
-    if status_callback:
-        status_callback("Preparing to download articles...")
+def scan_and_download_all_articles_util(df_all_posts, status_callback=None, progress_callback=None):
+    """Scans all posts, filters links, and downloads articles if they don't already exist."""
+    if status_callback: status_callback("Preparing to download articles...")
     os.makedirs(config.LINKED_ARTICLES_DIR, exist_ok=True)
-    print(f"Starting article scan. Saving to: {config.LINKED_ARTICLES_DIR}")
-
-    total_posts = len(df_all_posts)
-    downloaded_count = 0
-    skipped_count = 0
-    error_count = 0
-    excluded_count = 0
-
+    total_posts, downloaded, skipped, errors, excluded, posts_processed = len(df_all_posts), 0, 0, 0, 0, 0
+    
     for index, post_series in df_all_posts.iterrows():
-        post_number_val = post_series.get("Post Number")
-        post_id_for_filename_base = str(
-            post_number_val if pd.notna(post_number_val) else index
-        )
-        safe_post_id_for_filename = sanitize_filename_component(
-            post_id_for_filename_base
-        )
+        posts_processed += 1
+        if progress_callback: progress_callback(posts_processed, total_posts)
+        if status_callback and posts_processed % 20 == 0:
+            status_callback(f"Articles: Post {posts_processed}/{total_posts}. D:{downloaded}, S:{skipped}, E:{errors}")
 
-        if status_callback and (index + 1) % 20 == 0:
-            status_callback(
-                f"Articles: Post {index + 1}/{total_posts}. D:{downloaded_count}, S:{skipped_count}, E:{error_count}"
-            )
-        if (index + 1) % 100 == 0:
-            print(
-                f"Processing Articles for Post ID: {safe_post_id_for_filename} ({index+1}/{total_posts})"
-            )
+        post_id = str(post_series.get("Post Number", f"index_{index}"))
+        urls_to_check = set()
+        if post_series.get("Link"): urls_to_check.add(post_series["Link"])
+        if post_series.get("Text"): urls_to_check.update(_extract_urls_from_text(post_series["Text"]))
 
-        urls_to_check = []
-        main_link = post_series.get("Link")
-        if main_link and isinstance(main_link, str) and main_link.strip():
-            urls_to_check.append(main_link.strip())
-
-        text_content = post_series.get("Text", "")
-        if text_content:
-            urls_in_text = _extract_urls_from_text(text_content)
-            urls_to_check.extend(urls_in_text)
-
-        processed_urls_for_this_post = set()
-        unique_urls_this_post = []
         for url in urls_to_check:
-            if url not in processed_urls_for_this_post:
-                unique_urls_this_post.append(url)
-                processed_urls_for_this_post.add(url)
-
-        if not unique_urls_this_post:
-            continue
-
-        for url_idx, url in enumerate(unique_urls_this_post):
-            if (
-                not url
-                or not isinstance(url, str)
-                or not url.startswith(("http://", "https://"))
-            ):
-                continue
-
+            if not url or not isinstance(url, str) or not url.startswith(("http:", "https:")): continue
             if is_excluded_domain(url, config.EXCLUDED_LINK_DOMAINS):
-                excluded_count += 1
-                continue
-
-            exists, filepath = check_article_exists_util(safe_post_id_for_filename, url)
-
+                excluded += 1; continue
+            
+            exists, filepath = check_article_exists_util(post_id, url)
             if exists:
-                skipped_count += 1
-                continue
-
+                skipped += 1; continue
+            
             time.sleep(0.2)
             success, error_msg = download_article_util(url, filepath)
             if success:
-                downloaded_count += 1
+                downloaded += 1
             else:
                 print(f"    Error downloading Article {url[:70]}: {error_msg}")
-                error_count += 1
-
-    final_summary = f"Article download finished. New: {downloaded_count}, Skipped: {skipped_count}, Errors: {error_count}, Excluded: {excluded_count}."
+                errors += 1
+    
+    final_summary = f"Article download finished. New: {downloaded}, Skipped: {skipped}, Errors: {errors}, Excluded: {excluded}."
+    if status_callback: status_callback(final_summary)
     print(f"\n{final_summary}")
-    if status_callback:
-        status_callback(final_summary)
 
-
-def download_all_post_images_util(df_all_posts, status_callback=None):
-    """
-    Downloads images for posts from the DataFrame based on ImagesJSON.
-    """
-    if status_callback:
-        status_callback("Preparing to download images...")
+def download_all_post_images_util(df_all_posts, status_callback=None, progress_callback=None):
+    if status_callback: status_callback("Preparing to download main images...")
     os.makedirs(config.IMAGE_DIR, exist_ok=True)
-    print(f"Starting image download. Saving to: {config.IMAGE_DIR}")
-
-    total_images_downloaded = 0
-    total_images_skipped = 0
-    image_error_count = 0
-    posts_processed = 0
-    total_posts = len(df_all_posts)
+    total_posts, downloaded, skipped, errors, posts_processed = len(df_all_posts), 0, 0, 0, 0
 
     for index, row in df_all_posts.iterrows():
         posts_processed += 1
+        if progress_callback: progress_callback(posts_processed, total_posts)
         if status_callback and posts_processed % 20 == 0:
-            status_callback(
-                f"Images: Post {posts_processed}/{total_posts}. D:{total_images_downloaded}, S:{total_images_skipped}, E:{image_error_count}"
-            )
-        if posts_processed % 100 == 0:
-            print(f"Processing Images for post {posts_processed}/{total_posts}...")
-
+            status_callback(f"Images: Post {posts_processed}/{total_posts}. D:{downloaded}, S:{skipped}, E:{errors}")
+        
         images_in_post_json = row.get("ImagesJSON", [])
-
-        if not images_in_post_json or not isinstance(images_in_post_json, list):
-            continue
-
-        post_id_display = str(row.get("Post Number", f"index_{index}"))
+        if not isinstance(images_in_post_json, list): continue
 
         for img_data in images_in_post_json:
-            if not isinstance(img_data, dict):
-                continue
-
             img_filename = img_data.get("file")
-            if not img_filename:
-                continue
+            if not img_filename: continue
+            
+            image_url = config.QANON_PUB_MEDIA_BASE_URL + img_filename if not img_filename.startswith(("http:", "https:")) else img_filename
+            local_path = os.path.join(config.IMAGE_DIR, sanitize_filename_component(os.path.basename(img_filename)))
 
-            if not img_filename.startswith(("http://", "https://")):
-                image_url = config.QANON_PUB_MEDIA_BASE_URL + img_filename
-            else:
-                image_url = img_filename
-
-            local_image_path = os.path.join(
-                config.IMAGE_DIR,
-                sanitize_filename_component(os.path.basename(img_filename)),
-            )
-
-            if not os.path.exists(local_image_path):
+            if not os.path.exists(local_path):
                 time.sleep(0.1)
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-                }
                 try:
-                    response = requests.get(
-                        image_url, stream=True, timeout=20, headers=headers
-                    )
+                    response = requests.get(image_url, stream=True, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
                     response.raise_for_status()
-
-                    with open(local_image_path, "wb") as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                    total_images_downloaded += 1
-                except requests.exceptions.HTTPError as e:
-                    print(
-                        f"    HTTP Error downloading Image {image_url}: {e.response.status_code}"
-                    )
-                    image_error_count += 1
-                except requests.exceptions.RequestException as e:
-                    print(
-                        f"    Error downloading Image {image_url}: {type(e).__name__}"
-                    )
-                    image_error_count += 1
+                    with open(local_path, "wb") as f:
+                        for chunk in response.iter_content(8192): f.write(chunk)
+                    downloaded += 1
                 except Exception as e:
-                    print(
-                        f"    An unexpected error occurred with Image {image_url}: {e}"
-                    )
-                    image_error_count += 1
+                    print(f"    Error downloading Image {image_url}: {type(e).__name__}")
+                    errors += 1
             else:
-                total_images_skipped += 1
+                skipped += 1
 
-    final_summary = f"Image download finished. New: {total_images_downloaded}, Skipped: {total_images_skipped}, Errors: {image_error_count}."
+    final_summary = f"Main Image download finished. New: {downloaded}, Skipped: {skipped}, Errors: {errors}."
+    if status_callback: status_callback(final_summary)
     print(f"\n{final_summary}")
-    if status_callback:
-        status_callback(final_summary)
 
-    # Add this new function (you can place it near download_all_post_images_util):
-import time # Ensure time is imported if not already at the top of utils.py
-import requests # Ensure requests is imported
-
-def download_all_quoted_images_util(df_all_posts, status_callback=None):
-    """
-    Downloads images found within quoted posts from the DataFrame.
-    """
-    if status_callback:
-        status_callback("Preparing to download quoted images...")
-    os.makedirs(config.IMAGE_DIR, exist_ok=True) # Ensure image directory exists
-    print(f"Starting quoted image scan. Saving to: {config.IMAGE_DIR}") #
-
-    total_images_downloaded = 0
-    total_images_skipped = 0
-    image_error_count = 0
-    posts_processed = 0
-    total_posts_to_scan = len(df_all_posts)
+def download_all_quoted_images_util(df_all_posts, status_callback=None, progress_callback=None):
+    if status_callback: status_callback("Preparing to download quoted images...")
+    os.makedirs(config.IMAGE_DIR, exist_ok=True)
+    total_posts, downloaded, skipped, errors, posts_processed = len(df_all_posts), 0, 0, 0, 0
 
     for index, post_series in df_all_posts.iterrows():
         posts_processed += 1
-        # Update status less frequently for this more granular scan, or adjust as needed
+        if progress_callback: progress_callback(posts_processed, total_posts)
         if status_callback and posts_processed % 50 == 0:
-            status_callback(
-                f"Quoted Imgs Scan: Post {posts_processed}/{total_posts_to_scan}. New D:{total_images_downloaded}, Existing S:{total_images_skipped}, Err E:{image_error_count}"
-            )
-        if posts_processed % 200 == 0:
-            print(f"Processing Quoted Images for post {posts_processed}/{total_posts_to_scan}...")
-
+            status_callback(f"Quoted Imgs: Post {posts_processed}/{total_posts}. D:{downloaded}, S:{skipped}, E:{errors}")
+        
         referenced_posts_raw = post_series.get("Referenced Posts Raw", [])
-        if not referenced_posts_raw:
-            continue
+        if not isinstance(referenced_posts_raw, list): continue
 
         for ref_data in referenced_posts_raw:
-            if not isinstance(ref_data, dict):
-                continue
+            quoted_images = ref_data.get("images", [])
+            if not isinstance(quoted_images, list): continue
             
-            # 'images' key within each item of "Referenced Posts Raw"
-            quoted_images_metadata_list = ref_data.get("images", []) 
-            if not quoted_images_metadata_list or not isinstance(quoted_images_metadata_list, list):
-                continue
+            for img_meta in quoted_images:
+                img_filename = img_meta.get("file")
+                if not img_filename: continue
 
-            for img_meta in quoted_images_metadata_list: #
-                if not isinstance(img_meta, dict): #
-                    continue
+                image_url = "https://www.qanon.pub/data/media/" + img_filename if not img_filename.startswith(("http:", "https:")) else img_filename
+                local_path = os.path.join(config.IMAGE_DIR, sanitize_filename_component(os.path.basename(img_filename)))
 
-                img_filename_from_quote = img_meta.get("file") #
-                if not img_filename_from_quote: #
-                    continue
-                
-                # --- MODIFICATION FOR URL CONSTRUCTION ---
-                image_url = ""
-                # For quoted images, use the specific path structure observed from qanon.pub
-                if not img_filename_from_quote.startswith(("http://", "https://")):
-                    # Use the corrected base URL structure for these qanon.pub hosted quoted images
-                    image_url = "https://www.qanon.pub/data/media/" + img_filename_from_quote
-                else:
-                    # If img_filename_from_quote is already a full URL, use it directly
-                    image_url = img_filename_from_quote #
-                # --- END MODIFICATION ---
-                
-                sanitized_local_filename = sanitize_filename_component(os.path.basename(img_filename_from_quote)) #
-                local_image_path = os.path.join(config.IMAGE_DIR, sanitized_local_filename) #
-
-                if not os.path.exists(local_image_path): #
-                    time.sleep(0.1) #
-                    headers = { #
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-                    }
+                if not os.path.exists(local_path):
+                    time.sleep(0.1)
                     try:
-                        response = requests.get(image_url, stream=True, timeout=20, headers=headers) #
-                        response.raise_for_status() #
-
-                        with open(local_image_path, "wb") as f: #
-                            for chunk in response.iter_content(chunk_size=8192): #
-                                f.write(chunk)
-                        total_images_downloaded += 1 #
-                    except requests.exceptions.HTTPError as e: #
-                        print(f"    HTTP Error downloading Quoted Image {image_url}: {e.response.status_code}") #
-                        image_error_count += 1 #
-                    except requests.exceptions.RequestException as e: #
-                        print(f"    Error downloading Quoted Image {image_url}: {type(e).__name__}") #
-                        image_error_count += 1 #
-                    except Exception as e: #
-                        print(f"    An unexpected error occurred with Quoted Image {image_url}: {e}") #
-                        image_error_count += 1 #
+                        response = requests.get(image_url, stream=True, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+                        response.raise_for_status()
+                        with open(local_path, "wb") as f:
+                            for chunk in response.iter_content(8192): f.write(chunk)
+                        downloaded += 1
+                    except Exception as e:
+                        errors += 1
                 else:
-                    total_images_skipped += 1 #
+                    skipped += 1
     
-    final_summary = f"Quoted Image download finished. New: {total_images_downloaded}, Skipped (already exist): {total_images_skipped}, Errors: {image_error_count}." #
-    print(f"\n{final_summary}") #
-    if status_callback: #
-        status_callback(final_summary)
-
-
+    final_summary = f"Quoted Image download finished. New: {downloaded}, Skipped: {skipped}, Errors: {errors}."
+    if status_callback: status_callback(final_summary)
+    print(f"\n{final_summary}")
 # --- END ARTICLE_DOWNLOADING_UTILS ---
