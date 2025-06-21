@@ -84,29 +84,27 @@ class QPostViewer:
         self.root = root
         self.root.title("QView")
 
-# ---- ADD ICON SETTING LOGIC ----
+        # ---- START REPLACEMENT ICON/LOGO LOGIC ----
+       # try:
+        #    # Load the main application icon
+         #   icon_path_ico = os.path.join(config.APP_ROOT_DIR, 'q_icon.ico')
+          #  if os.path.exists(icon_path_ico):
+           #     self.root.iconbitmap(icon_path_ico)
+            
+            # Pre-load the RWB theme-specific logo and keep a reference
+            #self.rwb_logo_image = None
+            #rwb_logo_path = os.path.join(config.APP_ROOT_DIR, 'rwb_logo.png')
+            #if os.path.exists(rwb_logo_path):
+                # Use Pillow to correctly handle PNG transparency
+                #img_pil = Image.open(rwb_logo_path)
+                #self.rwb_logo_image = ImageTk.PhotoImage(img_pil)
+           # else:
+                # This will print to your terminal if the logo is missing from your QView folder
+               # print("NOTE: 'rwb_logo.png' not found. The welcome screen graphic will not be displayed.")
 
-        try:
-            # Attempt to load an .ico file (typically for Windows)
-            # Assumes 'q_icon.ico' is in APP_ROOT_DIR (where main.py/config.py are)
-            icon_path_ico = os.path.join(config.APP_ROOT_DIR, 'q_icon.ico') #
-            if os.path.exists(icon_path_ico):
-                self.root.iconbitmap(icon_path_ico)
-            else:
-                # Fallback to try a .png file if .ico is not found or for other platforms
-                # Assumes 'q_icon.png' is in APP_ROOT_DIR
-                icon_path_png = os.path.join(config.APP_ROOT_DIR, 'q_icon.png') #
-                if os.path.exists(icon_path_png):
-                    # For .iconphoto, you need a PhotoImage object
-                    # Ensure 'tk' is imported as 'import tkinter as tk' at the top of gui.py
-                    photo = tk.PhotoImage(file=icon_path_png) 
-                    self.root.iconphoto(False, photo) # 'False' makes it apply to this window and its Toplevels
-                else:
-                    print("DEBUG: Application icon (q_icon.ico or q_icon.png) not found in QView root directory.")
-        except Exception as e:
-            print(f"Error setting application icon: {e}")
-
-# ---- END ICON SETTING LOGIC ----
+       # except Exception as e:
+           # print(f"Error setting application icon or loading theme images: {e}")
+        # ---- END REPLACEMENT ICON/LOGO LOGIC ----
 
         window_width = 1024
         window_height = 720
@@ -293,16 +291,34 @@ class QPostViewer:
         self.content_sync_button.pack(side=tk.LEFT, padx=5, fill=tk.X)
         self.settings_button = ttk.Button(bottom_buttons_frame, text="Settings", command=self.show_settings_window)
         self.settings_button.pack(side=tk.LEFT, padx=5, fill=tk.X)
-        self.theme_toggle_button = ttk.Button(bottom_buttons_frame, text="Dark to Light", command=self.toggle_theme)
-        self.theme_toggle_button.pack(side=tk.LEFT, padx=5, fill=tk.X)
+        # --- New Theme Menu Button ---
+        self.theme_menu_button = ttk.Menubutton(bottom_buttons_frame, text="Themes", style="TButton")
+        self.theme_menu = tk.Menu(self.theme_menu_button, tearoff=0)
+        self.theme_menu_button["menu"] = self.theme_menu
+        
+        self.theme_var = tk.StringVar(value=self.current_theme)
+        
+        self.theme_menu.add_radiobutton(label="Dark Theme", variable=self.theme_var, value="dark", command=lambda: self._set_theme("dark"))
+        self.theme_menu.add_radiobutton(label="Light Theme", variable=self.theme_var, value="light", command=lambda: self._set_theme("light"))
+        self.theme_menu.add_radiobutton(label="RWB Theme", variable=self.theme_var, value="rwb", command=lambda: self._set_theme("rwb"))
+
+        self.theme_menu_button.pack(side=tk.LEFT, padx=5) # Use padx=5 instead of fill=tk.X
+        # --- End New Theme Menu Button ---
+
+        self.gematria_button = ttk.Button(bottom_buttons_frame, text="Gematria Calc", command=self.show_gematria_calculator_window)
+        self.gematria_button.pack(side=tk.LEFT, padx=5, fill=tk.X)
         self.help_button = ttk.Button(bottom_buttons_frame, text="Help & Info", command=self.show_help_window)
         self.help_button.pack(side=tk.LEFT, padx=5, fill=tk.X)
         self.about_button = ttk.Button(bottom_buttons_frame, text="About", command=self.show_about_dialog)
         self.about_button.pack(side=tk.LEFT, padx=5, fill=tk.X)
         ttk.Button(bottom_buttons_frame, text="Quit App", command=self.on_closing).pack(side=tk.LEFT, padx=5, fill=tk.X)
 
-        if self.current_theme == "light": self.apply_light_theme()
-        else: self.apply_dark_theme()
+        if self.current_theme == "light":
+            self.apply_light_theme()
+        elif self.current_theme == "rwb":
+            self.apply_rwb_theme()
+        else: # Default to dark if theme is "dark" or unknown
+            self.apply_dark_theme()
 
         self.restore_placeholder(None, config.PLACEHOLDER_POST_NUM, self.post_entry)
         self.restore_placeholder(None, config.PLACEHOLDER_KEYWORD, self.keyword_entry)
@@ -336,37 +352,62 @@ class QPostViewer:
             if not selected_text:
                 return
             
-            # URL-encode the selected text to make it safe for a URL
             encoded_text = urllib.parse.quote_plus(selected_text)
             
             if search_engine == 'google_books':
                 url = f"https://www.google.com/search?tbm=bks&q=%22{encoded_text}%22"
             elif search_engine == 'internet_archive':
                 url = f"https://archive.org/search?query=%22{encoded_text}%22"
+            elif search_engine == 'gematrix':
+                url = f"https://www.gematrix.org/?word={encoded_text}"
             else:
-                return # Do nothing if search engine is unknown
+                return
             
-            # Use the app's link preference helper to open the URL
             utils.open_link_with_preference(url, self.app_settings)
 
         except tk.TclError:
-            # This error occurs if no text is selected. Ignore it.
             pass
 
     def _add_context_menu_options(self):
         """Clears and re-adds commands to the context menu."""
         self.context_menu.delete(0, tk.END)
+        
+        try:
+            # Check if there is a selection to enable/disable menu items
+            selected_text = self.post_text_area.get(tk.SEL_FIRST, tk.SEL_LAST).strip()
+            state = tk.NORMAL if selected_text else tk.DISABLED
+        except tk.TclError:
+            state = tk.DISABLED
+
+        self.context_menu.add_command(label="Copy", command=self._copy_selection_to_clipboard, state=state)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(
+            label="Filter post list for selection",
+            command=self._filter_for_selection,
+            state=state
+        )
+        self.context_menu.add_separator()
         self.context_menu.add_command(
             label="Search Google Books for selection",
-            command=lambda: self._search_selection_with('google_books')
+            command=lambda: self._search_selection_with('google_books'),
+            state=state
         )
         self.context_menu.add_command(
             label="Search Internet Archive for selection",
-            command=lambda: self._search_selection_with('internet_archive')
+            command=lambda: self._search_selection_with('internet_archive'),
+            state=state
         )
-        # Add a separator
+        self.context_menu.add_command(
+            label="Search on Gematrix.org for selection",
+            command=lambda: self._search_selection_with('gematrix'),
+            state=state
+        )
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="Dismiss")
+        self.context_menu.add_command(
+            label="Calculate Gematria of selection",
+            command=lambda: self.show_gematria_calculator_window(self.post_text_area.get(tk.SEL_FIRST, tk.SEL_LAST).strip()),
+            state=state
+        )
 
 
     def _show_context_menu(self, event):
@@ -382,6 +423,104 @@ class QPostViewer:
         except tk.TclError:
             # No text is selected, do nothing.
             pass
+
+    def _copy_selection_to_clipboard(self):
+        """Copies the currently selected text to the clipboard."""
+        try:
+            selected_text = self.post_text_area.get(tk.SEL_FIRST, tk.SEL_LAST)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(selected_text)
+            print(f"Copied to clipboard: '{selected_text[:50]}...'")
+        except tk.TclError:
+            print("Copy to clipboard called with no text selected.")
+            pass # No text selected
+
+    def _filter_for_selection(self):
+        """Takes the selected text and initiates a keyword search for it."""
+        try:
+            selected_text = self.post_text_area.get(tk.SEL_FIRST, tk.SEL_LAST).strip()
+            if not selected_text:
+                return
+
+            # Use the existing keyword search logic
+            self.keyword_entry.delete(0, tk.END)
+            self.keyword_entry.insert(0, selected_text)
+            self.search_by_keyword()
+            
+        except tk.TclError:
+            pass # No text selected
+            
+    def show_gematria_calculator_window(self, initial_text=""):
+        """Creates and shows a standalone window for Gematria calculations."""
+        if hasattr(self, 'gematria_win') and self.gematria_win.winfo_exists():
+            self.gematria_win.lift()
+            self.gematria_win.focus_set()
+            # If initial text is provided, update the existing window's entry
+            if initial_text and hasattr(self, 'gematria_input_entry'):
+                 self.gematria_input_entry.delete(0, tk.END)
+                 self.gematria_input_entry.insert(0, initial_text)
+                 self.gematria_input_entry.focus_set()
+                 # Automatically calculate
+                 self._calculate_and_display_gematria_in_window(initial_text)
+            return
+
+        self.gematria_win = tk.Toplevel(self.root)
+        self.gematria_win.title("Gematria Calculator")
+        try:
+            dialog_bg = self.style.lookup("TFrame", "background")
+            text_fg = self.style.lookup("TEntry", "foreground")
+        except tk.TclError:
+            dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
+            text_fg = "#e0e0e0" if self.current_theme == "dark" else "#000000"
+        
+        self.gematria_win.configure(bg=dialog_bg)
+        self.gematria_win.geometry("350x250")
+        self.gematria_win.transient(self.root)
+        
+        main_frame = ttk.Frame(self.gematria_win, padding="10")
+        main_frame.pack(expand=True, fill=tk.BOTH)
+        
+        # --- Input Frame ---
+        input_frame = ttk.Frame(main_frame)
+        input_frame.pack(fill=tk.X)
+        
+        ttk.Label(input_frame, text="Text:").pack(side=tk.LEFT, padx=(0, 5))
+        self.gematria_input_entry = ttk.Entry(input_frame, font=('Arial', 10))
+        self.gematria_input_entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        self.gematria_input_entry.insert(0, initial_text)
+        
+        # --- Results Frame ---
+        results_frame = ttk.Labelframe(main_frame, text="Results", padding="10")
+        results_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.gematria_simple_var = tk.StringVar(value="Simple: 0")
+        self.gematria_reverse_var = tk.StringVar(value="Reverse: 0")
+        self.gematria_hebrew_var = tk.StringVar(value="Hebrew: 0")
+        
+        ttk.Label(results_frame, textvariable=self.gematria_simple_var, font=('Arial', 10, 'bold')).pack(anchor="w")
+        ttk.Label(results_frame, textvariable=self.gematria_reverse_var, font=('Arial', 10, 'bold')).pack(anchor="w")
+        ttk.Label(results_frame, textvariable=self.gematria_hebrew_var, font=('Arial', 10, 'bold')).pack(anchor="w")
+        
+        # --- Calculation Logic ---
+        def _calculate_and_display():
+            text_to_calc = self.gematria_input_entry.get()
+            results = utils.calculate_gematria(text_to_calc)
+            self.gematria_simple_var.set(f"Simple: {results['simple']}")
+            self.gematria_reverse_var.set(f"Reverse: {results['reverse']}")
+            self.gematria_hebrew_var.set(f"Hebrew: {results['hebrew']}")
+        
+        # Add binding to the entry field as well
+        self.gematria_input_entry.bind("<Return>", lambda e: _calculate_and_display())
+
+        # --- Button Frame ---
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        ttk.Button(button_frame, text="Calculate", command=_calculate_and_display).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 5))
+        ttk.Button(button_frame, text="Close", command=self.gematria_win.destroy).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        
+        # If text was passed in, calculate it immediately
+        if initial_text:
+            _calculate_and_display()
 
 # --- END CONTEXT_MENU_METHODS ---
 
@@ -1211,7 +1350,6 @@ class QPostViewer:
 # --- END DOWNLOAD_WINDOW_AND_THREADING ---
 
 # --- START SETTINGS_WINDOW_METHODS ---
-
     def show_settings_window(self):
         if hasattr(self, 'settings_win') and self.settings_win is not None and self.settings_win.winfo_exists():
             self.settings_win.lift()
@@ -1237,17 +1375,16 @@ class QPostViewer:
         main_frame.pack(expand=True, fill=tk.BOTH)
 
         # --- Theme Setting ---
-
         theme_frame = ttk.Labelframe(main_frame, text="Display Theme", padding="10")
         theme_frame.pack(fill="x", pady=5)
-        self.settings_theme_var = tk.StringVar(value=self.app_settings.get("theme", settings.DEFAULT_SETTINGS.get("theme", "dark")))
-        dark_rb_theme = ttk.Radiobutton(theme_frame, text="Dark", variable=self.settings_theme_var, value="dark", command=self.on_setting_change)
-        dark_rb_theme.pack(side="left", padx=5, expand=True)
-        light_rb_theme = ttk.Radiobutton(theme_frame, text="Light", variable=self.settings_theme_var, value="light", command=self.on_setting_change)
-        light_rb_theme.pack(side="left", padx=5, expand=True)
+        self.settings_theme_var = tk.StringVar(value=self.app_settings.get("theme", settings.DEFAULT_SETTINGS.get("theme")))
+        
+        # We now use the main _set_theme method directly from the radio buttons
+        ttk.Radiobutton(theme_frame, text="Dark", variable=self.settings_theme_var, value="dark", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
+        ttk.Radiobutton(theme_frame, text="Light", variable=self.settings_theme_var, value="light", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
+        ttk.Radiobutton(theme_frame, text="RWB", variable=self.settings_theme_var, value="rwb", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
 
         # --- Link Opening Preference ---
-
         link_pref_frame = ttk.Labelframe(main_frame, text="Link Opening Preference", padding="10")
         link_pref_frame.pack(fill="x", pady=5)
         self.settings_link_pref_var = tk.StringVar(value=self.app_settings.get("link_opening_preference", settings.DEFAULT_SETTINGS.get("link_opening_preference", "default")))
@@ -1258,57 +1395,28 @@ class QPostViewer:
         rb_chrome_incognito.pack(anchor="w", padx=5)
 
         # --- Close Button ---
-
         close_button_frame = ttk.Frame(main_frame)
         close_button_frame.pack(side="bottom", fill="x", pady=(10,0))
         ttk.Button(close_button_frame, text="Close", command=self.on_settings_window_close).pack(pady=5)
 
     def on_setting_change(self, event=None):
-
+        """Handles changes from the Settings window."""
         # Theme
-
         new_theme = self.settings_theme_var.get()
-        theme_changed = False
-        if self.app_settings.get("theme") != new_theme:
-            self.app_settings["theme"] = new_theme
-            self.current_theme = new_theme
-            theme_changed = True
-            if new_theme == "dark": 
-                self.apply_dark_theme()
-            else: 
-                self.apply_light_theme()
-            
-            if hasattr(self, 'theme_toggle_button'):
-                self.theme_toggle_button.config(text="Into the Dark" if new_theme == "light" else "Dark to Light")
-            
-            if hasattr(self, 'settings_win') and self.settings_win and self.settings_win.winfo_exists():
-                try: 
-                    self.settings_win.configure(bg=self.style.lookup("TFrame", "background"))
-                except tk.TclError: 
-                    pass
+        if self.current_theme != new_theme:
+            self._set_theme(new_theme) # Call the central handler which also saves
 
         # Link Opening Preference
-
         new_link_pref = self.settings_link_pref_var.get()
-        link_pref_changed = False
         if self.app_settings.get("link_opening_preference") != new_link_pref:
             self.app_settings["link_opening_preference"] = new_link_pref
-            link_pref_changed = True
-
-        if theme_changed or link_pref_changed:
-            settings.save_settings(self.app_settings)
-            print(f"Settings saved: Theme='{self.app_settings.get('theme')}', Link Pref='{self.app_settings.get('link_opening_preference')}'")
-            if theme_changed: # Only update full display if theme changed
-                if self.current_display_idx != -1 and self.df_displayed is not None and not self.df_displayed.empty : 
-                    self.update_display()
-                else: 
-                    self.show_welcome_message()
+            settings.save_settings(self.app_settings) # Save immediately
+            print(f"Link preference saved: '{new_link_pref}'")
 
     def on_settings_window_close(self):
         if hasattr(self, 'settings_win') and self.settings_win:
             self.settings_win.destroy()
             self.settings_win = None
-
 # --- END SETTINGS_WINDOW_METHODS ---
 
 # --- START SHOW_HELP_WINDOW ---
@@ -1429,12 +1537,80 @@ class QPostViewer:
 
 # --- END SHOW_HELP_WINDOW ---
 
-# --- START SHOW_ABOUT_DIALOG ---
+    def show_gematria_calculator_window(self, initial_text=""):
+        """Creates and shows a standalone window for Gematria calculations."""
+        if hasattr(self, 'gematria_win') and self.gematria_win.winfo_exists():
+            self.gematria_win.lift()
+            self.gematria_win.focus_set()
+            if initial_text and hasattr(self, 'gematria_input_entry'):
+                 self.gematria_input_entry.delete(0, tk.END)
+                 self.gematria_input_entry.insert(0, initial_text)
+                 self.gematria_input_entry.focus_set()
+                 # Automatically calculate when opened from context menu
+                 self._calculate_and_display_gematria_in_window(initial_text)
+            return
 
+        self.gematria_win = tk.Toplevel(self.root)
+        self.gematria_win.title("Gematria Calculator")
+        try:
+            dialog_bg = self.style.lookup("TFrame", "background")
+            text_fg = self.style.lookup("TEntry", "foreground")
+        except tk.TclError:
+            dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
+            text_fg = "#e0e0e0" if self.current_theme == "dark" else "#000000"
+        
+        self.gematria_win.configure(bg=dialog_bg)
+        self.gematria_win.geometry("350x250")
+        self.gematria_win.transient(self.root)
+        
+        main_frame = ttk.Frame(self.gematria_win, padding="10")
+        main_frame.pack(expand=True, fill=tk.BOTH)
+        
+        input_frame = ttk.Frame(main_frame)
+        input_frame.pack(fill=tk.X)
+        
+        ttk.Label(input_frame, text="Text:").pack(side=tk.LEFT, padx=(0, 5))
+        self.gematria_input_entry = ttk.Entry(input_frame, font=('Arial', 10))
+        self.gematria_input_entry.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        self.gematria_input_entry.insert(0, initial_text)
+        
+        results_frame = ttk.Labelframe(main_frame, text="Results", padding="10")
+        results_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.gematria_simple_var = tk.StringVar(value="Simple / Ordinal: 0")
+        self.gematria_reverse_var = tk.StringVar(value="Reverse Ordinal: 0")
+        self.gematria_hebrew_var = tk.StringVar(value="Hebrew / Jewish: 0")
+        self.gematria_english_var = tk.StringVar(value="English (Agrippa): 0")
+        
+        ttk.Label(results_frame, textvariable=self.gematria_simple_var, font=('Arial', 10, 'bold')).pack(anchor="w")
+        ttk.Label(results_frame, textvariable=self.gematria_reverse_var, font=('Arial', 10, 'bold')).pack(anchor="w")
+        ttk.Label(results_frame, textvariable=self.gematria_hebrew_var, font=('Arial', 10, 'bold')).pack(anchor="w")
+        ttk.Label(results_frame, textvariable=self.gematria_english_var, font=('Arial', 10, 'bold')).pack(anchor="w")
+        
+        def _calculate_and_display():
+            text_to_calc = self.gematria_input_entry.get()
+            if text_to_calc:
+                results = utils.calculate_gematria(text_to_calc)
+                self.gematria_simple_var.set(f"Simple / Ordinal: {results.get('simple', 0)}")
+                self.gematria_reverse_var.set(f"Reverse Ordinal: {results.get('reverse', 0)}")
+                self.gematria_hebrew_var.set(f"Hebrew / Jewish: {results.get('hebrew', 0)}")
+                self.gematria_english_var.set(f"English (Agrippa): {results.get('english', 0)}")
+        
+        self.gematria_input_entry.bind("<Return>", lambda e: _calculate_and_display())
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        ttk.Button(button_frame, text="Calculate", command=_calculate_and_display).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 5))
+        ttk.Button(button_frame, text="Close", command=self.gematria_win.destroy).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        
+        if initial_text:
+            _calculate_and_display()
+
+# --- START SHOW_ABOUT_DIALOG ---
     def show_about_dialog(self):
         messagebox.showinfo("About QView", 
                             "QView - Q Post Explorer\n\n"
-                            "Version: 0.9.0 (Inline Quoted Images & UI Enhancements)\n\n"
+                            "Version: 1.1 (Research & UI Update)\n\n"
                             "Developed for independent research and analysis of Q posts.\n"
                             "QView allows local exploration, searching, and annotation of the dataset.\n\n"
                             "Data processing in QView is based on the 'JSON-QAnon' dataset compilation by Jack Kingsman "
@@ -1442,7 +1618,6 @@ class QPostViewer:
                             "This application does not endorse any specific viewpoints but aims to provide a robust tool for study.\n\n"
                             "Happy digging!",
                             parent=self.root)
-
 # --- END SHOW_ABOUT_DIALOG ---
 
 # --- START PLACEHOLDER_HANDLING ---
@@ -1715,7 +1890,6 @@ class QPostViewer:
         self.current_theme = "dark"; self.style.theme_use('clam')
         bg="#2b2b2b"; fg="#e0e0e0"; entry_bg="#3c3f41"; btn_bg="#4f4f4f"; btn_active="#6a6a6a"
         tree_bg="#3c3f41"; tree_sel_bg="#0078D7"; tree_sel_fg="#ffffff"; heading_bg="#4f4f4f"
-        scroll_bg='#4f4f4f'; scroll_trough='#3c3f41'; scroll_arrow='#e0e0e0'
         progress_trough = '#3c3f41'; progress_bar_color = '#0078D7'
         
         self.root.configure(bg=bg); self.style.configure(".", background=bg, foreground=fg, font=('Arial',10))
@@ -1728,12 +1902,9 @@ class QPostViewer:
         self.style.configure("TEntry", fieldbackground=entry_bg, foreground=fg, insertbackground=fg, relief=tk.SUNKEN, borderwidth=1)
         self.style.configure("TLabelframe", background=bg, foreground=fg, relief=tk.GROOVE, borderwidth=1, padding=5)
         self.style.configure("TLabelframe.Label", background=bg, foreground=fg, font=('Arial',10,'bold'))
-        self.style.configure("Vertical.TScrollbar", background=scroll_bg, troughcolor=scroll_trough, arrowcolor=scroll_arrow, arrowsize=15,width=15)
-        self.style.map('Vertical.TScrollbar', background=[('active', btn_active)])
         self.style.configure("TCombobox", fieldbackground=entry_bg, background=btn_bg, foreground=fg, arrowcolor=fg, selectbackground=entry_bg, selectforeground=fg)
         
-        # --- New Progress Bar Style ---
-        self.style.configure("Contrasting.Horizontal.TProgressbar", troughcolor=progress_trough, background=progress_bar_color, thickness=15)
+        self.style.configure("Contrasting.Horizontal.TProgressbar", troughcolor=progress_trough, background=progress_bar_color, thickness=20)
 
         self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
         if hasattr(self,'image_display_frame'): self.image_display_frame.configure(style="TFrame")
@@ -1744,16 +1915,11 @@ class QPostViewer:
         self.post_text_area.tag_configure("quoted_ref_header",foreground="#ABBFD0"); self.post_text_area.tag_configure("quoted_ref_text_body",foreground="#FFEE77")
         self.post_text_area.tag_configure("welcome_title_tag", foreground="#FFCB6B"); self.post_text_area.tag_configure("welcome_text_tag", foreground="#e0e0e0")
         self.post_text_area.tag_configure("welcome_emphasis_tag", foreground="#A5C25C"); self.post_text_area.tag_configure("welcome_closing_tag", foreground="#FFD700")
-        
-        if hasattr(self,'theme_toggle_button'): self.theme_toggle_button.config(text="Dark to Light")
-        if hasattr(self,'post_entry') and self.post_entry.winfo_exists(): self.restore_placeholder(None, config.PLACEHOLDER_POST_NUM, self.post_entry)
-        if hasattr(self,'keyword_entry') and self.keyword_entry.winfo_exists(): self.restore_placeholder(None, config.PLACEHOLDER_KEYWORD, self.keyword_entry)
 
     def apply_light_theme(self):
         self.current_theme = "light"; self.style.theme_use('clam')
         bg_color="#f0f0f0"; fg_color="#000000"; entry_bg="#ffffff"; button_bg="#e1e1e1"; button_active_bg="#d1d1d1"
         tree_bg="#ffffff"; tree_sel_bg="#0078D7"; tree_sel_fg="#ffffff"; heading_bg="#e1e1e1"
-        scrollbar_bg='#c1c1c1'; scrollbar_trough='#e1e1e1'; scrollbar_arrow='#000000'
         progress_trough = '#dcdcdc'; progress_bar_color = '#4CAF50'
         
         self.root.configure(bg=bg_color); self.style.configure(".", background=bg_color, foreground=fg_color, font=('Arial',10))
@@ -1766,12 +1932,8 @@ class QPostViewer:
         self.style.configure("TEntry", fieldbackground=entry_bg, foreground=fg_color, insertbackground=fg_color, relief=tk.SUNKEN, borderwidth=1)
         self.style.configure("TLabelframe", background=bg_color, foreground=fg_color, relief=tk.GROOVE, borderwidth=1, padding=5)
         self.style.configure("TLabelframe.Label", background=bg_color, foreground=fg_color, font=('Arial',10,'bold'))
-        self.style.configure("Vertical.TScrollbar", background=scrollbar_bg, troughcolor=scrollbar_trough, arrowcolor=scrollbar_arrow, arrowsize=15, width=15)
-        self.style.map('Vertical.TScrollbar', background=[('active', '#b1b1b1')])
-        self.style.configure("TCombobox", fieldbackground=entry_bg, background=button_bg, foreground=fg_color, arrowcolor=fg_color, selectbackground=entry_bg, selectforeground=fg_color)
         
-        # --- New Progress Bar Style ---
-        self.style.configure("Contrasting.Horizontal.TProgressbar", troughcolor=progress_trough, background=progress_bar_color, thickness=15)
+        self.style.configure("Contrasting.Horizontal.TProgressbar", troughcolor=progress_trough, background=progress_bar_color, thickness=20)
 
         self.post_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
         if hasattr(self,'image_display_frame'): self.image_display_frame.configure(style="TFrame")
@@ -1782,19 +1944,75 @@ class QPostViewer:
         self.post_text_area.tag_configure("quoted_ref_header", foreground="#4A4A4A"); self.post_text_area.tag_configure("quoted_ref_text_body", foreground="#B8860B")
         self.post_text_area.tag_configure("welcome_title_tag", foreground="#D9534F"); self.post_text_area.tag_configure("welcome_text_tag", foreground="#000000")
         self.post_text_area.tag_configure("welcome_emphasis_tag", foreground="#8E44AD"); self.post_text_area.tag_configure("welcome_closing_tag", foreground="#5CB85C")
-        
-        if hasattr(self,'theme_toggle_button'): self.theme_toggle_button.config(text="Into the Dark")
-        if hasattr(self,'post_entry') and self.post_entry.winfo_exists(): self.restore_placeholder(None, config.PLACEHOLDER_POST_NUM, self.post_entry)
-        if hasattr(self,'keyword_entry') and self.keyword_entry.winfo_exists(): self.restore_placeholder(None, config.PLACEHOLDER_KEYWORD, self.keyword_entry)
 
-    def toggle_theme(self):
-        if self.current_theme == "dark": self.apply_light_theme()
-        else: self.apply_dark_theme()
-        # After toggling, we need to refresh the display to apply new tag colors
+    def apply_rwb_theme(self):
+        """Applies a Red, White, and Blue theme."""
+        self.current_theme = "rwb"; self.style.theme_use('clam')
+        # Official US Flag Colors: Old Glory Blue, Old Glory Red, White
+        bg = "#002868"; fg = "#FFFFFF"; entry_bg = "#1d3461"; btn_bg = "#4A6572"; btn_active = "#5E8294"
+        tree_bg = "#1d3461"; tree_sel_bg = "#BF0A30"; tree_sel_fg = "#FFFFFF"; heading_bg = "#4A6572"
+        progress_trough = entry_bg; progress_bar_color = "#BF0A30"
+        link_color = "#87CEEB" # A bright, patriotic blue
+        accent_gold = "#FFD700"
+        accent_red = "#BF0A30"
+        subtle_text_color = "#CCCCCC"
+
+        self.root.configure(bg=bg); self.style.configure(".", background=bg, foreground=fg, font=('Arial',10))
+        self.style.configure("TFrame", background=bg); self.style.configure("TLabel", background=bg, foreground=fg, padding=3)
+        self.style.configure("TButton", background=btn_bg, foreground=fg, padding=5, font=('Arial',9,'bold'), borderwidth=1, relief=tk.RAISED)
+        self.style.map("TButton", background=[("active",btn_active),("pressed","#5E8294")], relief=[("pressed",tk.SUNKEN)])
+        self.style.configure("Treeview", background=tree_bg, foreground=fg, fieldbackground=tree_bg, borderwidth=1, relief=tk.FLAT)
+        self.style.map("Treeview", background=[("selected",tree_sel_bg)], foreground=[("selected",tree_sel_fg)])
+        self.style.configure("Treeview.Heading", background=heading_bg, foreground=fg, font=('Arial',10,'bold'), relief=tk.FLAT, padding=3)
+        self.style.configure("TEntry", fieldbackground=entry_bg, foreground=fg, insertbackground=fg, relief=tk.SUNKEN, borderwidth=1)
+        self.style.configure("TLabelframe", background=bg, foreground=fg, relief=tk.GROOVE, borderwidth=1, padding=5)
+        self.style.configure("TLabelframe.Label", background=bg, foreground=fg, font=('Arial',10,'bold'))
+        self.style.configure("Contrasting.Horizontal.TProgressbar", troughcolor=progress_trough, background=progress_bar_color, thickness=20)
+        
+        self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
+        if hasattr(self,'image_display_frame'): self.image_display_frame.configure(style="TFrame")
+        
+        # --- FIX: Added complete set of tag configurations ---
+        self.post_text_area.tag_configure("bold_label",foreground=fg)
+        self.post_text_area.tag_configure("post_number_val",foreground=accent_gold)
+        self.post_text_area.tag_configure("date_val",foreground=subtle_text_color)
+        self.post_text_area.tag_configure("author_val",foreground=subtle_text_color)
+        self.post_text_area.tag_configure("themes_val",foreground=link_color)
+        self.post_text_area.tag_configure("image_val",foreground=link_color)
+        self.post_text_area.tag_configure("clickable_link_style",foreground=link_color)
+        self.post_text_area.tag_configure("bookmarked_header",foreground=accent_red)
+        self.post_text_area.tag_configure("quoted_ref_header",foreground=accent_gold)
+        self.post_text_area.tag_configure("quoted_ref_text_body",foreground=fg)
+        self.post_text_area.tag_configure("welcome_title_tag", foreground=accent_red)
+        self.post_text_area.tag_configure("welcome_text_tag", foreground=fg)
+        self.post_text_area.tag_configure("welcome_emphasis_tag", foreground=accent_gold)
+        self.post_text_area.tag_configure("welcome_closing_tag", foreground=accent_red)
+        
+        self.restore_placeholder(None, config.PLACEHOLDER_POST_NUM, self.post_entry)
+        self.restore_placeholder(None, config.PLACEHOLDER_KEYWORD, self.keyword_entry)
+
+    def _set_theme(self, theme_name):
+        """Sets the application theme and saves the setting."""
+        if self.current_theme == theme_name:
+            return
+
+        if theme_name == "dark":
+            self.apply_dark_theme()
+        elif theme_name == "light":
+            self.apply_light_theme()
+        elif theme_name == "rwb":
+            self.apply_rwb_theme()
+        
+        self.app_settings["theme"] = theme_name
+        self.theme_var.set(theme_name)
+        settings.save_settings(self.app_settings)
+        print(f"Theme changed and saved: '{theme_name}'")
+
         if self.current_display_idx != -1 and self.df_displayed is not None and not self.df_displayed.empty: 
             self.update_display()
         else: 
             self.show_welcome_message()
+
 # === END::THEME_TOGGLE ===
 
 # --- START CONFIGURE_TEXT_TAGS ---
@@ -1944,8 +2162,20 @@ class QPostViewer:
                                     photo_quote = ImageTk.PhotoImage(img_pil_quote)
                                     self._quote_image_references.append(photo_quote)
                                     
+# --- FIX: Add clickable link icon next to quote thumbnail ---
+                                    clickable_quote_img_tag = f"quote_img_open_{original_df_index}_{ref_idx}_{q_img_idx}"
+                                    
+                                    # Insert the thumbnail image
                                     self.post_text_area.image_create(tk.END, image=photo_quote)
-
+                                    # Insert a clickable link icon (chain) next to it
+                                    self.post_text_area.insert(tk.END, " 🔗", ('clickable_link_style', clickable_quote_img_tag))
+                                    # Bind the click event to open the full image
+                                    self.post_text_area.tag_bind(
+                                        clickable_quote_img_tag, 
+                                        "<Button-1>", 
+                                        lambda e, p=local_image_path_from_quote: utils.open_image_external(p, self.root)
+                                    )
+                                    # --- END FIX ---
                                     if q_img_idx < len(quoted_images_list) - 1:
                                         self.post_text_area.insert(tk.END, "  ")
                                 except Exception as e_quote_img:
@@ -2044,31 +2274,37 @@ class QPostViewer:
 
 
 # --- START SHOW_WELCOME_MESSAGE ---
-
     def show_welcome_message(self):
         self.post_text_area.config(state=tk.NORMAL); self.post_text_area.delete(1.0, tk.END)
         for widget in self.image_display_frame.winfo_children(): widget.destroy()
         self.displayed_images_references = []; self._quote_image_references = []; self.current_post_urls = []
-        title="QView – Offline Q Post Explorer\n"; para1="QView is a standalone desktop application designed for serious research into the full Q post archive. Built from the ground up for speed, clarity, and privacy, QView lets you search, explore, and annotate thousands of drops without needing an internet connection."
+        
+        # --- Conditionally display the RWB logo ---
+        #if self.current_theme == "rwb" and self.rwb_logo_image:
+           # logo_label = ttk.Label(self.image_display_frame, image=self.rwb_logo_image)
+           # logo_label.pack(pady=20, padx=20, anchor='center')
+
+        title="QView – Offline Q Post Explorer\n";
+        para1="QView is a standalone desktop application designed for serious research into the full Q post archive. Built from the ground up for speed, clarity, and privacy, QView lets you search, explore, and annotate thousands of drops without needing an internet connection."
         para2="Unlike web-based tools that can disappear or go dark, QView gives you complete control—local images, saved article archives, powerful search tools, and customizable settings wrapped in a clean, user-friendly interface. No tracking. No fluff. Just signal."
         para3="Development is 100% community-driven and fully open-source."
-        # para4="If you’ve found QView useful in your research or decoding work, consider buying me a coffee. It helps keep the project alive and evolving."
-        # donation_text_display="Buy me a coffee ☕"; donation_url="https://www.buymeacoffee.com/qview1776"
+        
         closing_text="🔒 No paywalls. No locked features."
-        self.post_text_area.insert(tk.END, title+"\n", "welcome_title_tag"); self.post_text_area.insert(tk.END, para1+"\n\n", "welcome_text_tag")
-        self.post_text_area.insert(tk.END, para2+"\n\n", "welcome_text_tag"); self.post_text_area.insert(tk.END, para3+"\n\n", ("welcome_text_tag", "welcome_emphasis_tag"))
-        # self.post_text_area.insert(tk.END, para4+" ", "welcome_text_tag")
-        # clickable_donation_tag_welcome="welcome_donation_link_main"
-        # self.post_text_area.insert(tk.END, donation_text_display, ("welcome_text_tag", "clickable_link_style", clickable_donation_tag_welcome))
-        # self.post_text_area.tag_bind(clickable_donation_tag_welcome, "<Button-1>", lambda e, url=donation_url: utils.open_link_with_preference(url, self.app_settings))
-        self.post_text_area.insert(tk.END, "\n\n", "welcome_text_tag") # This just inserts two newlines
-        self.post_text_area.insert(tk.END, closing_text+"\n", "welcome_closing_tag") # This line should still execute
-        self.post_text_area.config(state=tk.DISABLED)
+
+        self.post_text_area.insert(tk.END, title+"\n", "welcome_title_tag");
+        self.post_text_area.insert(tk.END, para1+"\n\n", "welcome_text_tag")
+        self.post_text_area.insert(tk.END, para2+"\n\n", "welcome_text_tag")
+        self.post_text_area.insert(tk.END, para3+"\n\n", ("welcome_text_tag", "welcome_emphasis_tag"))
+        
+        self.post_text_area.insert(tk.END, "\n\n", "welcome_text_tag")
+        self.post_text_area.insert(tk.END, closing_text+"\n", "welcome_closing_tag")
+        
+        # self.post_text_area.config(state=tk.DISABLED) # Keep commented out for now
+        
         if hasattr(self,'show_links_button'): self.show_links_button.config(state=tk.DISABLED)
         if hasattr(self,'view_article_button'): self.view_article_button.config(text="Article Not Saved", state=tk.DISABLED, command=lambda: None)
         self.update_post_number_label(is_welcome=True); self.update_bookmark_button_status(is_welcome=True)
         if hasattr(self,'view_edit_note_button'): self.view_edit_note_button.config(state=tk.DISABLED)
-
 # --- END SHOW_WELCOME_MESSAGE ---
 
 # --- START JUMP_TO_POST_FROM_REF ---

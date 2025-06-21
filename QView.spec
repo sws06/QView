@@ -9,8 +9,9 @@ THIS_FOLDER = os.getcwd()
 my_data_files = [
     (os.path.join(THIS_FOLDER, 'data', 'qview_posts_data.json'), 'data'),
     (os.path.join(THIS_FOLDER, 'q_icon.ico'), '.'),
-    (os.path.join(THIS_FOLDER, 'q_icon.png'), '.') # Make sure this PNG name is exact
-]
+    (os.path.join(THIS_FOLDER, 'q_icon.png'), '.'), # Make sure this PNG name is exact
+    (os.path.join(THIS_FOLDER, 'rwb_logo.png'), '.')
+],
 
 # --- Sanity Check Print (this will print when PyInstaller runs the spec file) ---
 print("--- QView.spec: Processing Data Files ---")

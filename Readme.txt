@@ -93,3 +93,14 @@ Post Data Source
 The Q post dataset is not included in this repository. You must obtain a source JSON file (like posts.url-normalized.json) and use the included create_qview_data.py script to format it for use with QView. A common source for historical post data is the jkingsman/JSON-QAnon archive on GitHub.
 
 Credits: Special thanks to jkingsman/JSON-QAnon for academic collation work.
+
+
+Summary of Changes for QView v1.2
+✨ New Features
+Red, White, & Blue (RWB) Theme: A complete, third theme option has been added to the application, accessible from the theme menu and settings.
+🛠️ Major Bug Fixes & Stability Improvements
+Corrected Startup Theme: Fixed a critical bug that caused the application to always start in Dark Mode, ignoring the user's saved preference. The app now correctly launches with the last selected theme.
+Fixed "Content Sync" Functionality: Repaired the entire content download system. A TypeError that crashed the feature was resolved by updating utils.py to correctly handle callbacks from the GUI. A secondary bug where the article downloader was missing has also been fixed.
+Restored Quoted Image Links: The clickable "🔗" icon next to image thumbnails inside quoted posts has been restored, allowing users to open those images externally again.
+Resolved UI Crash: The primary source of UI instability—an issue with loading a welcome image for the RWB theme—has been resolved by removing the image logic, ensuring the application is stable when switching to any theme.
+Given these updates, the application is now significantly more stable and feature-complete than before.
