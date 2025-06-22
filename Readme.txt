@@ -1,106 +1,131 @@
-QView - Q Post Explorer v1.1
-Overview
-QView is a standalone desktop application meticulously designed for exploring, searching, and analyzing the Q posts dataset. It provides an intuitive graphical user interface (GUI) to navigate through thousands of posts, view detailed content including images, and leverage powerful search and analysis tools. The application also features robust capabilities for offline content archival, ensuring that valuable data (images and web articles) remains accessible.
+# QView – Local Q Drop Explorer & Delta Analyzer
 
-This project was built to provide a powerful, private, and persistent tool for anyone looking to seriously engage with and understand this unique dataset, independent of online platforms.
+**QView** is a standalone desktop application for exploring, analyzing, and archiving Q posts. Built for researchers, not just readers — it's private, offline-friendly, and powered by a clean GUI designed for deep digs.
 
-🔗 Discuss QView on XDA:
-View the official XDA thread here https://xdaforums.com/t/tool-win-qview-offline-q-drop-explorer-delta-search-archive-tool-dark-to-light.4742777/
+🔍 Explore post metadata, images, links, and deltas  
+🧠 Filter by themes, dates, keywords, or custom notes  
+🗃️ Download linked content for full offline research  
+🎨 Switch between Dark, Light, and Patriot (RWB) themes  
+🔧 Export data, calculate Gematria, and right-click to dig deeper  
 
-Key Features
+> 💬 Join the discussion: [Official XDA Thread](https://xdaforums.com/t/tool-win-qview-offline-q-drop-explorer-delta-search-archive-tool-dark-to-light.4742777/)
 
-1. Rich Data Display & Interaction:
+---
 
-Presents posts in a sortable and filterable list (columns: Post #, Date, Bookmark status).
-Detailed Post View:
-Displays Post Number, Date/Time (in both UTC and your local timezone), Author, and Tripcode.
-Lists automatically assigned Themes based on keywords within the post content.
-Renders full post text with automatically detected, clickable hyperlinks.
-Clearly displays quoted posts, with clickable references to jump directly to the source post if it's in the dataset.
-Integrated Media Handling:
-Displays thumbnails of images attached to the main post.
-Displays thumbnails of images found within quoted posts, with a clickable link symbol (🔗) to open the full-size image.
-All images can be opened in your system's default image viewer with a click.
+## 🚀 Key Features
 
-2. Powerful & Versatile Search:
+### 🔎 Data Explorer
+- Sortable, searchable list of all Q posts
+- See post number, timestamp (UTC/local), author, and tripcode
+- Quoted post linking (jump-to-post + image previews)
+- Auto-tagged themes based on post content
+- Clickable links + downloadable media
 
-By Post Number: Find a single post (1776), a range (100-200), or a list (1, 25, 101).
-By Keyword/Theme: Full-text search of post content and assigned themes.
-By Date: An integrated calendar for viewing all posts from a specific day.
-Delta Search: Finds posts from the same month and day across all years. Includes a "Today's Deltas" quick-access button.
-Filter by Bookmarks: Instantly view only your bookmarked posts.
-Show All Posts: A dedicated button to clear any active search or filter.
+### 📖 Post Viewer
+- Side-by-side layout for text + images
+- Auto-hiding image panel (if no images exist)
+- Bookmarks & personal notes (saved locally)
+- Quick jump by post number, range, or comma list
 
-3. User-Driven Research Tools:
+### 🧰 Right-Click Research Toolkit
+- Search selected text via Google Books or Internet Archive
+- Filter all posts containing the selected word/phrase
+- Calculate Gematria (Hebrew, English, Simple)
+- Copy text or dismiss menu
 
-Right-Click Context Menu: Highlight any text in the post viewer and right-click to bring up a context menu. From there, you can instantly search for the selected text on Google Books or the Internet Archive.
-Bookmarking: Mark any post as a favorite for easy recall.
-Personal Notes: Add and save your own multi-line annotations to any post.
-Export Data: Export the currently displayed list of posts to either HTML (with formatted text and links) or CSV format.
+### 📅 Search Tools
+- Delta Search (same month/day, different years)
+- “Today’s Deltas” quick button
+- Full calendar-based search by date
+- Theme/keyword search with live filtering
 
-4. Offline Content Archival:
+### 📥 Offline Archival
+- Download post images, quoted images, and linked articles
+- Progress bars for each content type
+- Stored in local folder structure, accessible offline
 
-Dedicated "Content Sync" Window:
-Download Main Images: Download all image attachments from the main posts.
-Download Quoted Images: A separate utility to find and download images that appear only within quoted content.
-Download Articles: Archive the full HTML of web pages linked in posts for offline reading and to preserve sources.
-Individual Progress Bars: Each download type has its own dedicated progress bar, providing clear visual feedback and a "completed" status for the session.
+### 🎨 UI & Customization
+- Switch between Light, Dark, and Patriot (RWB) themes
+- Auto-saves theme preference
+- Configurable browser preference (Chrome incognito or default)
 
-5. Customization & UI:
+---
 
-Dark & Light Themes: Instantly switch between themes. Your preference is saved.
-Link Opening Preference: Choose in settings whether links open in your system's default browser or in a Google Chrome incognito tab.
-Flexible Layout: The main window components intelligently resize. The download and help windows are also resizable.
-Help & Info Window: Provides usage tips and links to relevant online resources.
-Setup & Running the Application
-There are two ways to use QView: running the pre-packaged application (easiest and recommended for most users) or running from the source code (for developers).
+## 🛠 Setup Instructions
 
-Running the Packaged Application (Recommended)
-Go to the Releases page of this GitHub repository.
-Under the latest release, find the .zip file for your operating system (e.g., QView-v1.0.0-Windows.zip).
-Download and extract the zip file to a folder on your computer.
-Run the QView.exe (or equivalent) executable inside the extracted folder.
-On first run, the application will create a user_data folder next to the executable to store your settings, bookmarks, notes, and all downloaded content.
-Running from Source (for Developers)
+### Option 1: Run the Pre-Packaged App (Recommended)
+1. [Download latest release](https://github.com/sws06/QView/releases)
+2. Extract the `.zip` file
+3. Run `QView.exe`
+4. A `user_data/` folder will be created on first launch
 
-1. Prerequisites:
+### Option 2: Run from Source
 
-Python 3.x (developed with 3.9+)
-The following Python libraries (install using pip install <library_name>):
-Pillow
-pandas
-requests
-tkcalendar
-lxml (often used by pandas for HTML parsing, good to have)
-A tkinter installation (on many Linux systems, this may need to be installed separately, e.g., sudo apt-get install python3-tk).
+#### Prereqs
+- Python 3.9+
+- Required libraries:
+  ```bash
+  pip install pillow pandas requests tkcalendar lxml
+tkinter may require separate install:
 
-2. Data Preparation:
+bash
+Copy code
+sudo apt-get install python3-tk  # Linux
+Data Setup
+Get a posts.url-normalized.json source file (e.g. from jkingsman/JSON-QAnon)
 
-The application reads its data from a specific file: data/qview_posts_data.json.
-This file must be generated by running the included create_qview_data.py script. This script uses a more comprehensive source file (e.g., posts.url-normalized.json from an archive like jkingsman/JSON-QAnon) as its input.
-To prepare your data:
-Place your source posts.url-normalized.json file in the root of the QView project folder.
-Run the conversion script from your terminal: python create_qview_data.py.
-This will create the qview_posts_data.json file. Ensure this file is located in the data/ subfolder.
+Run the conversion:
 
-3. Run the Application:
+bash
+Copy code
+python create_qview_data.py
+It will generate data/qview_posts_data.json — now you’re good to go.
 
-Once your data is prepared, run the main script from your terminal:
-Bash
-
+Launch
+bash
+Copy code
 python main.py
-Post Data Source
-The Q post dataset is not included in this repository. You must obtain a source JSON file (like posts.url-normalized.json) and use the included create_qview_data.py script to format it for use with QView. A common source for historical post data is the jkingsman/JSON-QAnon archive on GitHub.
-
-Credits: Special thanks to jkingsman/JSON-QAnon for academic collation work.
-
-
-Summary of Changes for QView v1.2
+📦 Latest Release: v1.2 – June 14, 2025
 ✨ New Features
-Red, White, & Blue (RWB) Theme: A complete, third theme option has been added to the application, accessible from the theme menu and settings.
-🛠️ Major Bug Fixes & Stability Improvements
-Corrected Startup Theme: Fixed a critical bug that caused the application to always start in Dark Mode, ignoring the user's saved preference. The app now correctly launches with the last selected theme.
-Fixed "Content Sync" Functionality: Repaired the entire content download system. A TypeError that crashed the feature was resolved by updating utils.py to correctly handle callbacks from the GUI. A secondary bug where the article downloader was missing has also been fixed.
-Restored Quoted Image Links: The clickable "🔗" icon next to image thumbnails inside quoted posts has been restored, allowing users to open those images externally again.
-Resolved UI Crash: The primary source of UI instability—an issue with loading a welcome image for the RWB theme—has been resolved by removing the image logic, ensuring the application is stable when switching to any theme.
-Given these updates, the application is now significantly more stable and feature-complete than before.
+ New [Patriot Theme] (Red, White & Blue)
+
+ Right-click menu: Google Books, Archive.org, Gematria, Filter
+
+ Delta Search upgrades: date loops, cleaner UI
+
+ Saved article viewer for offline HTMLs
+
+🐛 Bug Fixes
+Fixed theme preference not loading at launch
+
+Restored broken image links in quoted posts
+
+Fixed crash related to welcome image handling
+
+Repaired full "Content Sync" functionality
+
+📂 Post Data Source
+Q posts are not included in this repo.
+Use a JSON dataset like posts.url-normalized.json from:
+
+📎 https://github.com/jkingsman/JSON-QAnon
+Then run create_qview_data.py to convert it.
+
+📌 Special thanks to jkingsman for the archival work.
+
+🔐 Philosophy
+No tracking. No telemetry. No internet required.
+This is a tool for those who don’t want to rely on public portals.
+
+“Truth doesn’t auto-update. It must be found.”
+
+🧠 Coming Soon / On Deck
+Advanced Filter Chains (e.g., theme + delta + date)
+
+Watchlist Mode (encrypted post tagging)
+
+Custom Theme Builder
+
+Broadcast Loader (external lists of notable drops)
+
+Public Notes Export
