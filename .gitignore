@@ -1,6 +1,7 @@
 # Ignore user-specific data, downloaded content, and caches
 user_data/
 __pycache__/
+XDA QView Thread/
 *.pyc
 *.pyo
 *.pyd

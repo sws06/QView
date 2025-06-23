@@ -1891,6 +1891,7 @@ class QPostViewer:
         bg="#2b2b2b"; fg="#e0e0e0"; entry_bg="#3c3f41"; btn_bg="#4f4f4f"; btn_active="#6a6a6a"
         tree_bg="#3c3f41"; tree_sel_bg="#0078D7"; tree_sel_fg="#ffffff"; heading_bg="#4f4f4f"
         progress_trough = '#3c3f41'; progress_bar_color = '#0078D7'
+        accent_yellow = "#FFCB6B" # Define the yellow color for reuse
         
         self.root.configure(bg=bg); self.style.configure(".", background=bg, foreground=fg, font=('Arial',10))
         self.style.configure("TFrame", background=bg); self.style.configure("TLabel", background=bg, foreground=fg, padding=3)
@@ -1908,13 +1909,24 @@ class QPostViewer:
 
         self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
         if hasattr(self,'image_display_frame'): self.image_display_frame.configure(style="TFrame")
-        self.post_text_area.tag_configure("bold_label",foreground="#a9b7c6"); self.post_text_area.tag_configure("post_number_val",foreground="#FFCB6B")
-        self.post_text_area.tag_configure("date_val",foreground="#A5C25C"); self.post_text_area.tag_configure("author_val",foreground="#B0B0B0")
-        self.post_text_area.tag_configure("themes_val",foreground="#C39AC9"); self.post_text_area.tag_configure("image_val",foreground="#589DF6")
-        self.post_text_area.tag_configure("clickable_link_style",foreground=self.link_label_fg_dark); self.post_text_area.tag_configure("bookmarked_header",foreground="#FFD700")
-        self.post_text_area.tag_configure("quoted_ref_header",foreground="#ABBFD0"); self.post_text_area.tag_configure("quoted_ref_text_body",foreground="#FFEE77")
-        self.post_text_area.tag_configure("welcome_title_tag", foreground="#FFCB6B"); self.post_text_area.tag_configure("welcome_text_tag", foreground="#e0e0e0")
-        self.post_text_area.tag_configure("welcome_emphasis_tag", foreground="#A5C25C"); self.post_text_area.tag_configure("welcome_closing_tag", foreground="#FFD700")
+
+        # --- MODIFICATION: Set all metadata labels to yellow for contrast ---
+        self.post_text_area.tag_configure("bold_label", foreground=accent_yellow) # This is the change
+        self.post_text_area.tag_configure("post_number_val", foreground=accent_yellow)
+
+        # --- Configure remaining tags for theme consistency ---
+        self.post_text_area.tag_configure("date_val",foreground="#A5C25C")
+        self.post_text_area.tag_configure("author_val",foreground="#B0B0B0")
+        self.post_text_area.tag_configure("themes_val",foreground="#C39AC9")
+        self.post_text_area.tag_configure("image_val",foreground="#589DF6")
+        self.post_text_area.tag_configure("clickable_link_style",foreground=self.link_label_fg_dark)
+        self.post_text_area.tag_configure("bookmarked_header",foreground="#FFD700")
+        self.post_text_area.tag_configure("quoted_ref_header",foreground="#ABBFD0")
+        self.post_text_area.tag_configure("quoted_ref_text_body",foreground="#FFEE77")
+        self.post_text_area.tag_configure("welcome_title_tag", foreground="#FFCB6B")
+        self.post_text_area.tag_configure("welcome_text_tag", foreground="#e0e0e0")
+        self.post_text_area.tag_configure("welcome_emphasis_tag", foreground="#A5C25C")
+        self.post_text_area.tag_configure("welcome_closing_tag", foreground="#FFD700")
 
     def apply_light_theme(self):
         self.current_theme = "light"; self.style.theme_use('clam')
@@ -1972,17 +1984,19 @@ class QPostViewer:
         self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
         if hasattr(self,'image_display_frame'): self.image_display_frame.configure(style="TFrame")
         
-        # --- FIX: Added complete set of tag configurations ---
-        self.post_text_area.tag_configure("bold_label",foreground=fg)
-        self.post_text_area.tag_configure("post_number_val",foreground=accent_gold)
-        self.post_text_area.tag_configure("date_val",foreground=subtle_text_color)
-        self.post_text_area.tag_configure("author_val",foreground=subtle_text_color)
-        self.post_text_area.tag_configure("themes_val",foreground=link_color)
-        self.post_text_area.tag_configure("image_val",foreground=link_color)
-        self.post_text_area.tag_configure("clickable_link_style",foreground=link_color)
-        self.post_text_area.tag_configure("bookmarked_header",foreground=accent_red)
-        self.post_text_area.tag_configure("quoted_ref_header",foreground=accent_gold)
-        self.post_text_area.tag_configure("quoted_ref_text_body",foreground=fg)
+        # --- MODIFICATION: Set all metadata labels to gold/yellow for contrast ---
+        self.post_text_area.tag_configure("bold_label", foreground=accent_gold) # This is the change
+        self.post_text_area.tag_configure("post_number_val", foreground=accent_gold)
+        self.post_text_area.tag_configure("bookmarked_header", foreground=accent_red)
+
+        # --- Configure remaining tags for theme consistency ---
+        self.post_text_area.tag_configure("date_val", foreground=subtle_text_color)
+        self.post_text_area.tag_configure("author_val", foreground=subtle_text_color)
+        self.post_text_area.tag_configure("themes_val", foreground=link_color)
+        self.post_text_area.tag_configure("image_val", foreground=link_color)
+        self.post_text_area.tag_configure("clickable_link_style", foreground=link_color)
+        self.post_text_area.tag_configure("quoted_ref_header", foreground=accent_gold)
+        self.post_text_area.tag_configure("quoted_ref_text_body", foreground=fg)
         self.post_text_area.tag_configure("welcome_title_tag", foreground=accent_red)
         self.post_text_area.tag_configure("welcome_text_tag", foreground=fg)
         self.post_text_area.tag_configure("welcome_emphasis_tag", foreground=accent_gold)
@@ -2012,6 +2026,7 @@ class QPostViewer:
             self.update_display()
         else: 
             self.show_welcome_message()
+
 
 # === END::THEME_TOGGLE ===
 
