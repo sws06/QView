@@ -8,6 +8,7 @@ import config
 DEFAULT_SETTINGS = {
     "theme": "rwb",  # "dark", "light", or "rwb"
     "link_opening_preference": "default",  # "default" or "chrome_incognito"
+    "highlight_abbreviations": True, # New setting for abbreviation highlighting
 }
 # --- END DEFAULT_SETTINGS ---
 
