@@ -118,6 +118,7 @@ class QPostViewer:
         self.highlight_abbreviations_var = tk.BooleanVar(value=self.app_settings.get("highlight_abbreviations", settings.DEFAULT_SETTINGS["highlight_abbreviations"]))
 
         self.style = ttk.Style()
+        self.theme_var = tk.StringVar(value=self.current_theme) # For settings window radio buttons, if needed centrally
 
 # --- Main Layout Grid Setup ---
 
@@ -256,6 +257,7 @@ class QPostViewer:
         self.search_menu.add_command(label="Search by Date", command=self.show_calendar)
         self.search_menu.add_command(label="Delta Search", command=self.show_day_delta_dialog)
         self.search_menu.add_command(label="Today's Deltas", command=self.search_today_deltas)
+        self.search_menu.add_command(label="Search by Theme", command=self.show_theme_selection_dialog) # NEW: Search by Theme
         Tooltip(self.search_menu_button, lambda: "Advanced search options including by specific date, or by month/day across all years.")
 
         self.search_menu_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
@@ -353,48 +355,29 @@ class QPostViewer:
 # --- START UPDATE_DISPLAY ---
 
     def update_display(self):
-# Clear existing images from the image scrollable frame
-        for widget in self.image_scrollable_frame.winfo_children():
-            widget.destroy()
-        self.displayed_images_references = [] # Clear references to allow garbage collection
-        self._quote_image_references = [] # Clear inline quote image references
-        self.current_post_urls = []
-        self.current_post_downloaded_article_path = None
-        
-        self.post_text_area.config(state=tk.NORMAL)
-        self.post_text_area.delete(1.0, tk.END)
-        
+        for widget in self.image_scrollable_frame.winfo_children(): widget.destroy()
+        self.displayed_images_references = []; self._quote_image_references = []; self.current_post_urls = []; self.current_post_downloaded_article_path = None
+        self.post_text_area.config(state=tk.NORMAL); self.post_text_area.delete(1.0, tk.END)
+        show_images = True
         if self.df_displayed is None or self.df_displayed.empty or not (0 <= self.current_display_idx < len(self.df_displayed)):
-            self.show_welcome_message()
-            return
+            self.show_welcome_message(); return
         
         original_df_index = self.df_displayed.index[self.current_display_idx]
         post = self.df_all_posts.loc[original_df_index]
-        post_number_val = post.get('Post Number')
-        safe_filename_post_id = utils.sanitize_filename_component(str(post_number_val if pd.notna(post_number_val) else original_df_index))
-        pn_display_raw = post.get('Post Number', original_df_index)
-        pn_str = f"#{pn_display_raw}" if pd.notna(pn_display_raw) else f"(Idx:{original_df_index})"
-        is_bookmarked = original_df_index in self.bookmarked_posts
-        bookmark_indicator_text_raw = "[BOOKMARKED]" if is_bookmarked else ""
+        post_number_val = post.get('Post Number'); safe_filename_post_id = utils.sanitize_filename_component(str(post_number_val if pd.notna(post_number_val) else original_df_index))
+        pn_display_raw = post.get('Post Number', original_df_index); pn_str = f"#{pn_display_raw}" if pd.notna(pn_display_raw) else f"(Idx:{original_df_index})"
+        is_bookmarked = original_df_index in self.bookmarked_posts; bookmark_indicator_text_raw = "[BOOKMARKED]" if is_bookmarked else ""
         
         self.post_text_area.insert(tk.END, utils.sanitize_text_for_tkinter(f"QView Post {pn_str} "), "post_number_val")
-        if is_bookmarked:
-            self.post_text_area.insert(tk.END, utils.sanitize_text_for_tkinter(bookmark_indicator_text_raw) + "\n", "bookmarked_header")
-        else:
-            self.post_text_area.insert(tk.END, "\n")
+        if is_bookmarked: self.post_text_area.insert(tk.END, utils.sanitize_text_for_tkinter(bookmark_indicator_text_raw) + "\n", "bookmarked_header")
+        else: self.post_text_area.insert(tk.END, "\n")
         
         dt_val = post.get('Datetime_UTC')
         if pd.notna(dt_val):
-            dt_utc = dt_val.tz_localize('UTC') if dt_val.tzinfo is None else dt_val
-            dt_local = dt_utc.tz_convert(None)
-            date_local_str=f"{dt_local.strftime('%Y-%m-%d %H:%M:%S %Z')} (Local)\n"
-            date_utc_str=f"{dt_utc.strftime('%Y-%m-%d %H:%M:%S %Z')} (UTC)\n"
-            self.post_text_area.insert(tk.END, "Date: ", "bold_label")
-            self.post_text_area.insert(tk.END, date_local_str, "date_val")
-            self.post_text_area.insert(tk.END, "      ", "bold_label")
-            self.post_text_area.insert(tk.END, date_utc_str, "date_val")
-        else:
-            self.post_text_area.insert(tk.END, "Date: No Date\n", "bold_label")
+            dt_utc = dt_val.tz_localize('UTC') if dt_val.tzinfo is None else dt_val; dt_local = dt_utc.tz_convert(None)
+            date_local_str=f"{dt_local.strftime('%Y-%m-%d %H:%M:%S %Z')} (Local)\n"; date_utc_str=f"{dt_utc.strftime('%Y-%m-%d %H:%M:%S %Z')} (UTC)\n"
+            self.post_text_area.insert(tk.END, "Date: ", "bold_label"); self.post_text_area.insert(tk.END, date_local_str, "date_val"); self.post_text_area.insert(tk.END, "      ", "bold_label"); self.post_text_area.insert(tk.END, date_utc_str, "date_val")
+        else: self.post_text_area.insert(tk.END, "Date: No Date\n", "bold_label")
         
         author_text_raw=post.get('Author',''); tripcode_text_raw=post.get('Tripcode',''); author_text=utils.sanitize_text_for_tkinter(author_text_raw); tripcode_text=utils.sanitize_text_for_tkinter(tripcode_text_raw)
         if author_text and pd.notna(author_text_raw): self.post_text_area.insert(tk.END, "Author: ", "bold_label"); self.post_text_area.insert(tk.END, f"{author_text}\n", "author_val")
@@ -478,86 +461,79 @@ class QPostViewer:
         self.post_text_area.insert(tk.END, "Post Text:\n", ("bold_label"))
         self._insert_text_with_abbreviations_and_urls(self.post_text_area, main_text_content_raw, (), f"main_{original_df_index}")
         
-# --- MODIFIED: Image Display Logic for scrollable frame and dynamic visibility ---
-        images_json_data = post.get('ImagesJSON', [])
-        if images_json_data and isinstance(images_json_data, list) and len(images_json_data) > 0:
-            self.post_text_area.insert(tk.END, f"\n\n--- Images ({len(images_json_data)}) ---\n", "bold_label")
-
+        if show_images:
+            images_json_data = post.get('ImagesJSON', [])
+            if images_json_data and isinstance(images_json_data, list) and len(images_json_data) > 0:
+                self.post_text_area.insert(tk.END, f"\n\n--- Images ({len(images_json_data)}) ---\n", "bold_label")
+                
 # Restore sash if it was forgotten and set initial width
-            image_pane_index = self.text_image_paned_window.panes().index(self.image_display_frame)
-            sash_index = image_pane_index - 1
+                image_pane_index = self.text_image_paned_window.panes().index(self.image_display_frame)
+                sash_index = image_pane_index - 1
 
-            if not self.text_image_paned_window.sash_exists(sash_index):
-                self.text_image_paned_window.pane(self.image_display_frame, weight=1, width=250) # Set weight and desired width
-            else:
-                self.text_image_paned_window.pane(self.image_display_frame, weight=1, width=250) # Just set weight and width if already there
+                if not self.text_image_paned_window.sash_exists(sash_index):
+                    self.text_image_paned_window.pane(self.image_display_frame, weight=1, width=250) # Set weight and desired width
+                else:
+                    self.text_image_paned_window.pane(self.image_display_frame, weight=1, width=250) # Just set weight and width if already there
 
 # Ensure the sash is visible by moving it to the desired position
-            self.text_image_paned_window.update_idletasks() # Ensure sizes are calculated
+                self.text_image_paned_window.update_idletasks() # Ensure sizes are calculated
 # Set sash position to give 250px to image pane (from right)
 # This is complex with horizontal panedwindow, need to calculate total width.
 # Best approach: set it based on current overall width of parent.
-            parent_width = self.text_image_paned_window.winfo_width()
-            if parent_width > 0: # Only if window has a width
-                 self.text_image_paned_window.sash_place(sash_index, parent_width - 250, self.text_image_paned_window.winfo_height() // 2)
+                parent_width = self.text_image_paned_window.winfo_width()
+                if parent_width > 0: # Only if window has a width
+                     self.text_image_paned_window.sash_place(sash_index, parent_width - 250, self.text_image_paned_window.winfo_height() // 2)
 
+                for img_data in images_json_data:
+                    img_filename = img_data.get('file')
+                    if img_filename:
+                        local_image_path = os.path.join(config.IMAGE_DIR, utils.sanitize_filename_component(os.path.basename(img_filename)))
 
-# Populate images
-            for img_data in images_json_data:
-                img_filename = img_data.get('file')
-                if img_filename:
-                    local_image_path = os.path.join(config.IMAGE_DIR, utils.sanitize_filename_component(os.path.basename(img_filename)))
+                        if os.path.exists(local_image_path):
+                            try:                              
+                                img_pil = Image.open(local_image_path)
+                                img_pil.thumbnail((300, 300))
+                                photo = ImageTk.PhotoImage(img_pil)
+                                img_label = ttk.Label(self.image_scrollable_frame, image=photo, cursor="hand2")
+                                img_label.image = photo
+                                img_label.pack(pady=2, anchor='nw')
+                                img_label.bind("<Button-1>", lambda e, p=local_image_path: utils.open_image_external(p, self.root))
+                                self.displayed_images_references.append(photo)
+                            except Exception as e:            
+                                print(f"Err display img {local_image_path}: {e}")
+                                self.post_text_area.insert(tk.END, f"[Err display img: {img_filename}]\n", "image_val")
+                        else:                             
+                            self.post_text_area.insert(tk.END, f"[Img not found: {img_filename}]\n", "image_val")
+                
+                self.image_scrollable_frame.update_idletasks() # Ensure geometry is calculated
+                self.image_canvas.config(scrollregion=self.image_canvas.bbox("all"))
 
-                    if os.path.exists(local_image_path):
-                        try:                              
-                            img_pil = Image.open(local_image_path)
-                            img_pil.thumbnail((300, 300))
-                            photo = ImageTk.PhotoImage(img_pil)
-# Add image to the scrollable frame, not directly to image_display_frame
-                            img_label = ttk.Label(self.image_scrollable_frame, image=photo, cursor="hand2")
-                            img_label.image = photo # Keep a reference!
-                            img_label.pack(pady=2, anchor='nw')
-                            img_label.bind("<Button-1>", lambda e, p=local_image_path: utils.open_image_external(p, self.root))
-                            self.displayed_images_references.append(photo) # Keep reference in list
-
-                        except Exception as e:            
-                            print(f"Err display img {local_image_path}: {e}")
-                            self.post_text_area.insert(tk.END, f"[Err display img: {img_filename}]\n", "image_val")
-                    else:                             
-                        self.post_text_area.insert(tk.END, f"[ImgN/F]", ("image_val"))
-            
-# Update scrollregion AFTER all images are packed and frame has had a chance to resize
-            self.image_scrollable_frame.update_idletasks() # Ensure geometry is calculated
-            self.image_canvas.config(scrollregion=self.image_canvas.bbox("all"))
-
-
-        else: 
-# No images found
-            img_count_from_data = post.get('Image Count', 0)
-            if img_count_from_data == 0 : 
-                self.post_text_area.insert(tk.END, "\n\nImage Count: 0\n", "image_val")
             else: 
-                self.post_text_area.insert(tk.END, f"\n\n--- Images ({img_count_from_data}) - metadata mismatch or files not found ---\n", "image_val")
-            
+                img_count_from_data = post.get('Image Count', 0)
+                if img_count_from_data == 0 : 
+                    self.post_text_area.insert(tk.END, "\n\nImage Count: 0\n", "image_val")
+                else: 
+                    self.post_text_area.insert(tk.END, f"\n\n--- Images ({img_count_from_data}) - metadata mismatch or files not found ---\n", "image_val")
+                
 # Collapse the image pane if no images
-            image_pane_index = self.text_image_paned_window.panes().index(self.image_display_frame)
-            sash_index = image_pane_index - 1
-            
-            self.text_image_paned_window.pane(self.image_display_frame, weight=0, width=0) # Collapse it and set width to 0
-            if sash_index >= 0 and self.text_image_paned_window.sash_exists(sash_index):
-                 self.text_image_paned_window.sash_forget(sash_index) # Hide sash
+                image_pane_index = self.text_image_paned_window.panes().index(self.image_display_frame)
+                sash_index = image_pane_index - 1
+                
+                self.text_image_paned_window.pane(self.image_display_frame, weight=0, width=0) # Collapse it and set width to 0
+                if sash_index >= 0 and self.text_image_paned_window.sash_exists(sash_index):
+                     self.text_image_paned_window.sash_forget(sash_index) # Hide sash
 
 # After hiding, update idletasks to ensure it collapses visually
-            self.text_image_paned_window.update_idletasks()
+                self.text_image_paned_window.update_idletasks()
             
-        metadata_link_raw = post.get('Link')
-        if metadata_link_raw and pd.notna(metadata_link_raw) and len(str(metadata_link_raw).strip()) > 0 :
-            actual_metadata_link_str = utils.sanitize_text_for_tkinter(str(metadata_link_raw).strip())
-# --- MODIFIED: Use the new helper for source link too ---
-            self.post_text_area.insert(tk.END, "\nSource Link: ", "bold_label")
-            self._insert_text_with_abbreviations_and_urls(self.post_text_area, actual_metadata_link_str, ("clickable_link_style",) , f"metalink_{original_df_index}")
-            self.post_text_area.insert(tk.END, "\n")
-        elif post.get('Site') and post.get('Board'): site_text=utils.sanitize_text_for_tkinter(post.get('Site','')); board_text=utils.sanitize_text_for_tkinter(post.get('Board','')); self.post_text_area.insert(tk.END, "\nSource: ", "bold_label"); self.post_text_area.insert(tk.END, f"{site_text}/{board_text}\n", "author_val")
+            metadata_link_raw = post.get('Link')
+            if metadata_link_raw and pd.notna(metadata_link_raw) and len(str(metadata_link_raw).strip()) > 0 :
+                actual_metadata_link_str = utils.sanitize_text_for_tkinter(str(metadata_link_raw).strip())
+                # --- MODIFIED: Use the new helper for source link too ---
+                self.post_text_area.insert(tk.END, "\nSource Link: ", "bold_label")
+                self._insert_text_with_abbreviations_and_urls(self.post_text_area, actual_metadata_link_str, ("clickable_link_style",) , f"metalink_{original_df_index}")
+                self.post_text_area.insert(tk.END, "\n")
+            elif post.get('Site') and post.get('Board'): site_text=utils.sanitize_text_for_tkinter(post.get('Site','')); board_text=utils.sanitize_text_for_tkinter(post.get('Board','')); self.post_text_area.insert(tk.END, "\nSource: ", "bold_label"); self.post_text_area.insert(tk.END, f"{site_text}/{board_text}\n", "author_val")
         
         article_found_path = None; urls_to_scan_for_articles = []
         if metadata_link_raw and isinstance(metadata_link_raw, str) and metadata_link_raw.strip(): urls_to_scan_for_articles.append(metadata_link_raw.strip())
@@ -965,7 +941,7 @@ class QPostViewer:
 
         if not keyword or keyword == placeholder:
             messagebox.showwarning("Input",
-                                   "Please enter a keyword or theme to search.",
+                                   "Please enter a keyword or phrase to search.",
                                    parent=self.root)
             if not keyword: 
 # If truly empty, restore placeholder
@@ -984,7 +960,7 @@ class QPostViewer:
             (self.df_all_posts['Themes'].apply(lambda x: isinstance(x, list) and any(keyword_lower in theme.lower() for theme in x)))
         ]
         
-        self._handle_search_results(results, f"Keyword/Theme = '{keyword}'")
+        self._handle_search_results(results, f"Search = '{keyword}'") # Updated search term string
         
 # Clear the entry and restore placeholder after search attempt
         entry_widget.delete(0, tk.END)
@@ -1146,6 +1122,105 @@ class QPostViewer:
         self._search_by_month_day(today.month, today.day)
 
 # --- END DELTA_SEARCH_LOGIC ---
+
+# --- START THEME_SEARCH_LOGIC ---
+
+    def show_theme_selection_dialog(self):
+        if self.df_all_posts is None or self.df_all_posts.empty:
+            messagebox.showwarning("No Data", "No post data loaded to search themes.", parent=self.root)
+            return
+
+        try:
+            dialog_bg = self.style.lookup("TFrame", "background")
+            listbox_bg = self.style.lookup("Treeview", "fieldbackground")
+            listbox_fg = self.style.lookup("Treeview", "foreground")
+            select_bg = self.style.lookup("Treeview", "selectbackground")
+            select_fg = self.style.lookup("Treeview", "selectforeground")
+        except tk.TclError: # Fallback colors
+            dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
+            listbox_bg = "#3c3f41" if self.current_theme == "dark" else "#ffffff"
+            listbox_fg = "#e0e0e0" if self.current_theme == "dark" else "#000000"
+            select_bg = "#0078D7"
+            select_fg = "#ffffff"
+
+        theme_dialog = tk.Toplevel(self.root)
+        theme_dialog.title("Select Themes to Search")
+        theme_dialog.configure(bg=dialog_bg)
+        theme_dialog.geometry("400x450")
+        theme_dialog.transient(self.root)
+        theme_dialog.grab_set()
+
+        main_frame = ttk.Frame(theme_dialog, padding="10")
+        main_frame.pack(expand=True, fill=tk.BOTH)
+
+        # Instructions Label
+        ttk.Label(main_frame, text="Select one or more themes:", wraplength=350).pack(pady=(0, 5), anchor="w")
+
+        # Listbox for themes
+        listbox_frame = ttk.Frame(main_frame)
+        listbox_frame.pack(expand=True, fill=tk.BOTH, pady=(5, 10))
+
+        theme_listbox = tk.Listbox(listbox_frame, selectmode=tk.MULTIPLE,
+                                   bg=listbox_bg, fg=listbox_fg,
+                                   selectbackground=select_bg, selectforeground=select_fg,
+                                   exportselection=False, # Important for multiple listboxes
+                                   font=('Arial', 10), relief=tk.SOLID, borderwidth=1)
+        
+        listbox_scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=theme_listbox.yview)
+        theme_listbox.config(yscrollcommand=listbox_scrollbar.set)
+        
+        theme_listbox.pack(side="left", fill="both", expand=True)
+        listbox_scrollbar.pack(side="right", fill="y")
+
+        # Populate listbox with human-readable theme names
+        # Sort them alphabetically for consistent display
+        display_theme_names = sorted([
+            " ".join(word.capitalize() for word in theme_key.split('_'))
+            for theme_key in config.THEMES.keys()
+        ])
+        for theme_name in display_theme_names:
+            theme_listbox.insert(tk.END, theme_name)
+
+        def perform_theme_search():
+            selected_display_indices = theme_listbox.curselection()
+            selected_themes_display = [theme_listbox.get(i) for i in selected_display_indices]
+            
+            if not selected_themes_display:
+                messagebox.showwarning("No Selection", "Please select at least one theme.", parent=theme_dialog)
+                return
+
+            # Convert display names back to original theme keys for searching
+            selected_theme_keys = []
+            for display_name in selected_themes_display:
+                # Find the original key by reversing the capitalization process
+                original_key = "_".join(word.lower() for word in display_name.split(' '))
+                if original_key in config.THEMES: # Sanity check
+                    selected_theme_keys.append(original_key)
+            
+            if not selected_theme_keys:
+                messagebox.showerror("Error", "Could not map selected themes to internal keys.", parent=theme_dialog)
+                return
+
+            theme_dialog.destroy() # Close the selection dialog
+
+            # Perform the actual search in the DataFrame
+            # Filter posts where the 'Themes' list contains ANY of the selected theme keys
+            results = self.df_all_posts[
+                self.df_all_posts['Themes'].apply(
+                    lambda themes: any(t_key in themes for t_key in selected_theme_keys) if isinstance(themes, list) else False
+                )
+            ]
+            
+            search_term_str = f"Themes = '{', '.join(selected_themes_display)}'"
+            self._handle_search_results(results, search_term_str)
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+
+        ttk.Button(button_frame, text="Search", command=perform_theme_search).pack(side=tk.LEFT, expand=True, padx=(0, 5))
+        ttk.Button(button_frame, text="Cancel", command=theme_dialog.destroy).pack(side=tk.LEFT, expand=True)
+
+# --- END THEME_SEARCH_LOGIC ---
 
 # --- START CLEAR_SEARCH_AND_SHOW_ALL ---
 
