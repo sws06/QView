@@ -68,35 +68,15 @@ def save_bookmarks_to_file(bookmarks_set, filepath):
     except Exception as e: print(f"Could not save bookmarks: {e}")
 
 def load_user_notes(filepath):
-    """Loads user notes from the file. Converts old string format to new dict format."""
-    if not os.path.exists(filepath):
-        return {}
+    if not os.path.exists(filepath): return {}
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            raw_notes = json.load(f)
-            # Convert any old string-only notes to the new dictionary format
-            converted_notes = {}
-            for key, value in raw_notes.items():
-                if isinstance(value, str):
-                    converted_notes[key] = {"content": value, "show_tooltip": True} # Default old notes to show tooltip
-                elif isinstance(value, dict) and "content" in value:
-                    # Ensure show_tooltip exists, default to True if missing
-                    value["show_tooltip"] = value.get("show_tooltip", True)
-                    converted_notes[key] = value
-                else:
-                    print(f"Warning: Skipping malformed note for key {key}: {value}")
-            return converted_notes
-    except Exception as e:
-        print(f"Could not load user notes: {e}. Returning empty notes.")
-        return {}
-        
+        with open(filepath, "r", encoding="utf-8") as f: return json.load(f)
+    except Exception as e: print(f"Could not load user notes: {e}"); return {}
+
 def save_user_notes(notes_dict, filepath):
-    """Saves the user notes dictionary to the file."""
     try:
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(notes_dict, f, indent=4)
-    except Exception as e:
-        print(f"Could not save user notes: {e}")    
+        with open(filepath, "w", encoding="utf-8") as f: json.dump(notes_dict, f, indent=4)
+    except Exception as e: print(f"Could not save user notes: {e}")
 
 def sanitize_text_for_tkinter(text):
     return str(text).replace("\x00", "") if isinstance(text, str) else str(text)
@@ -240,24 +220,9 @@ def format_cell_text_for_gui_html(text): # <--- INSERT THIS ENTIRE FUNCTION
     text_str = str(text)
     # Escape HTML special characters first, then replace newlines
     escaped_text = html.escape(text_str)
-    return escaped_text.replace('\n', '<br />\n')
-
-def _show_text_widget_context_menu(event):
-    """Binds a right-click event to show the default Tkinter Text widget context menu."""
-    widget = event.widget
-    # Create a temporary menu
-    menu = tk.Menu(widget, tearoff=0)
-
-    # Add standard commands
-    menu.add_command(label="Cut", command=lambda: widget.event_generate("<<Cut>>"))
-    menu.add_command(label="Copy", command=lambda: widget.event_generate("<<Copy>>"))
-    menu.add_command(label="Paste", command=lambda: widget.event_generate("<<Paste>>"))
-
-    # Display the menu
-    menu.tk_popup(event.x_root, event.y_root)    
+    return escaped_text.replace('\n', '<br />\n')    
 
 # --- END NEW AND CORRECTED FUNCTIONS ---
-
 
 def calculate_gematria(text):
     if not isinstance(text, str): text = str(text)

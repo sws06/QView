@@ -147,12 +147,6 @@ class QPostViewer:
 
 # --- END Treeview Setup ---
 
-# --- START TREEVIEW_NOTE_TOOLTIP_SETUP ---
-        self.treeview_note_tooltip = Tooltip(self.post_tree, self._get_note_tooltip_text, delay=500)
-        self.post_tree.bind("<Motion>", self._on_treeview_motion_for_tooltip)
-        self.post_tree.bind("<Leave>", self._on_treeview_leave_for_tooltip)
-# --- END TREEVIEW_NOTE_TOOLTIP_SETUP ---
-
 # --- Right Pane (Text Area + Image Display) with Panedwindow ---
 
         self.details_outer_frame = ttk.Frame(root)
@@ -1428,11 +1422,7 @@ class QPostViewer:
             return
 
         original_df_index = str(self.df_displayed.index[self.current_display_idx])
-        
-        # Retrieve current note content and show_tooltip preference
-        note_data = self.user_notes.get(original_df_index, {"content": "", "show_tooltip": True})
-        current_note_content = note_data["content"]
-        current_show_tooltip = note_data["show_tooltip"]
+        current_note = self.user_notes.get(original_df_index, "")
 
         note_popup = tk.Toplevel(self.root)
         note_popup.title(f"Note for Post (Index: {original_df_index})")
@@ -1457,37 +1447,21 @@ class QPostViewer:
         note_text_widget = tk.Text(popup_main_frame, wrap=tk.WORD, height=15, font=("TkDefaultFont", 10), relief=tk.SOLID, borderwidth=1, padx=5, pady=5)
         note_text_widget.configure(bg=text_bg, fg=text_fg, insertbackground=text_fg)
         note_text_widget.pack(expand=True, fill=tk.BOTH, pady=(0,10))
-        note_text_widget.insert(tk.END, current_note_content)
+        note_text_widget.insert(tk.END, current_note)
         note_text_widget.focus_set()
-
-        # Enable standard Tkinter text widget context menu (cut/copy/paste)
-        # This makes the default right-click menu available.
-        note_text_widget.bind_class("Text", "<Button-3>", utils._show_text_widget_context_menu)
-        note_text_widget.bind_class("Text", "<Control-v>", lambda e: note_text_widget.event_generate("<<Paste>>"))
-
-
-        # Checkbox for Tooltip
-        show_tooltip_var = tk.BooleanVar(value=current_show_tooltip)
-        ttk.Checkbutton(popup_main_frame, text="Show this note as a tooltip in Treeview", variable=show_tooltip_var).pack(anchor="w", pady=(0, 5))
 
         button_frame = ttk.Frame(popup_main_frame)
         button_frame.pack(fill=tk.X)
 
         def save_and_close():
             note_content = note_text_widget.get(1.0, tk.END).strip()
-            tooltip_enabled = show_tooltip_var.get()
-            
             if note_content:
-                self.user_notes[original_df_index] = {"content": note_content, "show_tooltip": tooltip_enabled}
+                self.user_notes[original_df_index] = note_content
             elif original_df_index in self.user_notes: # If content is empty, remove note
                 del self.user_notes[original_df_index]
             
             utils.save_user_notes(self.user_notes, config.USER_NOTES_FILE_PATH) # Save immediately
-            print(f"Note for post index {original_df_index} saved. Tooltip enabled: {tooltip_enabled}")
-            
-            # Refresh treeview to update '♪' icon and potentially tooltips
-            self.repopulate_treeview(self.df_displayed, select_first_item=False) 
-            self.select_tree_item_by_idx(self.current_display_idx) # Reselect current post
+            print(f"Note for post index {original_df_index} saved.")
             note_popup.destroy()
 
         def cancel_and_close():
@@ -1501,43 +1475,6 @@ class QPostViewer:
         note_popup.protocol("WM_DELETE_WINDOW", cancel_and_close)
 
 # --- END USER_NOTES_METHODS ---
-
-# --- START TREEVIEW_MOTION_LEAVE_FOR_TOOLTIP ---
-
-    def _on_treeview_motion_for_tooltip(self, event):
-        """Handle mouse motion over treeview to show/hide note tooltips."""
-        # Hide any existing tooltip first
-        self.treeview_note_tooltip.hidetip()
-
-        # Get the item (row) under the mouse
-        item = self.post_tree.identify_row(event.y)
-
-        # Check if an item (row) is identified
-        if item:
-            original_df_index = item # Treeview iid is the original DataFrame index
-            note_data = self.user_notes.get(original_df_index)
-
-            # Check if there's note data, if tooltip is enabled, and if content exists
-            if note_data and note_data.get("show_tooltip", True) and note_data.get("content", "").strip():
-                # Store enough info to retrieve the content later
-                self.treeview_note_tooltip.text_generator = \
-                    lambda idx=original_df_index: self.user_notes.get(idx, {}).get("content", "").strip()
-                self.treeview_note_tooltip.schedule() # Show tooltip
-            else:
-                self.treeview_note_tooltip.unschedule() # Hide if no valid note/tooltip disabled
-        else:
-            self.treeview_note_tooltip.unschedule() # Not over any item
-
-    def _on_treeview_leave_for_tooltip(self, event):
-        """Handle mouse leaving treeview to hide note tooltips."""
-        self.treeview_note_tooltip.unschedule()
-        self.treeview_note_tooltip.hidetip()
-
-    def _get_note_tooltip_text(self):
-        # This is a placeholder; the text_generator is updated in _on_treeview_motion_for_tooltip
-        # when a specific item is identified.
-        return "" 
-# --- END TREEVIEW_MOTION_LEAVE_FOR_TOOLTIP ---
 
 # --- START EXPORT_DISPLAYED_LIST ---
 
@@ -2212,9 +2149,7 @@ class QPostViewer:
                 post_num_display = f"#{post_num_real}" if pd.notna(post_num_real) else f"Idx:{iid_original_index_str}"
                 is_bookmarked_char = "★" if row.name in self.bookmarked_posts else ""
 # NEW: Check for notes and add indicator
-# In gui.py, inside repopulate_treeview, replace the has_note_char line:
-# NEW: Check for notes and add indicator
-                has_note_char = "♪" if iid_original_index_str in self.user_notes and self.user_notes.get(iid_original_index_str, {}).get("content", "").strip() else ""
+                has_note_char = "♪" if iid_original_index_str in self.user_notes and self.user_notes.get(iid_original_index_str).strip() else ""
                 self.post_tree.insert("", "end", iid=iid_original_index_str, values=(post_num_display, date_str, has_note_char, is_bookmarked_char)) # Added has_note_char
 
         if dataframe_to_show is not None and not dataframe_to_show.empty:
