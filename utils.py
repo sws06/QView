@@ -212,6 +212,15 @@ def scan_and_download_all_articles_util(df, status_callback=None, progress_callb
     summary = f"Article download finished. New:{downloaded}, Skipped:{skipped}, Errors:{errors}, Excluded:{excluded}"
     if status_callback: status_callback(summary)
     print(summary)
+    
+def format_cell_text_for_gui_html(text): # <--- INSERT THIS ENTIRE FUNCTION
+    """Formats text for HTML table cells, replacing newlines with <br />."""
+    if pd.isna(text) or text is None:
+        return ""
+    text_str = str(text)
+    # Escape HTML special characters first, then replace newlines
+    escaped_text = html.escape(text_str)
+    return escaped_text.replace('\n', '<br />\n')    
 
 # --- END NEW AND CORRECTED FUNCTIONS ---
 

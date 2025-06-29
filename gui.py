@@ -772,39 +772,39 @@ class QPostViewer:
 
 
     def _show_context_menu(self, event):
-        self._add_context_menu_options()
-        
+        # Prioritize existing selection if it exists
         try:
-            index_at_mouse = self.post_text_area.index(f"@{event.x},{event.y}")
-            word_start = self.post_text_area.index(f"{index_at_mouse} wordstart")
-            word_end = self.post_text_area.index(f"{index_at_mouse} wordend")
-            
-            if word_start == word_end:
-                 line_content = self.post_text_area.get(f"{index_at_mouse} linestart", f"{index_at_mouse} lineend")
-                 char_in_line = int(index_at_mouse.split('.')[-1])
-                 
-                 bracketed_match = re.search(r'\[([A-Z0-9/\-, ]+)\]', line_content)
-                 if bracketed_match:
-                     start_char_idx = bracketed_match.start(0)
-                     end_char_idx = bracketed_match.end(0)
-                     
-                     if start_char_idx <= char_in_line <= end_char_idx:
-                         line_num = index_at_mouse.split('.')[0]
-                         word_start = f"{line_num}.{start_char_idx}"
-                         word_end = f"{line_num}.{end_char_idx}"
-                         self.post_text_area.tag_remove(tk.SEL, "1.0", tk.END)
-                         self.post_text_area.tag_add(tk.SEL, word_start, word_end)
-            else:
-                self.post_text_area.tag_remove(tk.SEL, "1.0", tk.END)
-                self.post_text_area.tag_add(tk.SEL, word_start, word_end)
+            # Check if there's an active selection before processing event coordinates
+            if not self.post_text_area.tag_ranges(tk.SEL):
+                # No active selection, try to select word or bracketed text under mouse
+                index_at_mouse = self.post_text_area.index(f"@{event.x},{event.y}")
+                word_start = self.post_text_area.index(f"{index_at_mouse} wordstart")
+                word_end = self.post_text_area.index(f"{index_at_mouse} wordend")
+                
+                if word_start == word_end:
+                    # Check if it's within a bracketed abbreviation like [ROTH]
+                    line_content = self.post_text_area.get(f"{index_at_mouse} linestart", f"{index_at_mouse} lineend")
+                    char_in_line = int(index_at_mouse.split('.')[-1])
+                    
+                    bracketed_match = re.search(r'\[([A-Z0-9/\-, ]+)\]', line_content)
+                    if bracketed_match:
+                        start_char_idx = bracketed_match.start(0)
+                        end_char_idx = bracketed_match.end(0)
+                        
+                        if start_char_idx <= char_in_line <= end_char_idx:
+                            line_num = index_at_mouse.split('.')[0]
+                            word_start = f"{line_num}.{start_char_idx}"
+                            word_end = f"{line_num}.{end_char_idx}"
+                            self.post_text_area.tag_add(tk.SEL, word_start, word_end)
+                else:
+                    self.post_text_area.tag_add(tk.SEL, word_start, word_end)
 
-            if self.post_text_area.tag_ranges(tk.SEL):
-                 self.context_menu.tk_popup(event.x_root, event.y_root)
-            else:
-                 self.context_menu.tk_popup(event.x_root, event.y_root)
-
+            self._add_context_menu_options() # Populate menu based on selection
+            self.context_menu.tk_popup(event.x_root, event.y_root)
 
         except tk.TclError:
+            # If selection handling fails (e.g., no text under cursor), just show the menu
+            self._add_context_menu_options()
             self.context_menu.tk_popup(event.x_root, event.y_root)
 
     def _copy_selection_to_clipboard(self):
