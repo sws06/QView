@@ -238,9 +238,19 @@ class QPostViewer:
 
         self.post_number_label = ttk.Label(nav_frame, text="", width=35, anchor="center", font=('Arial', 11, 'bold'))
         self.post_number_label.pack(side="left", padx=5, expand=True, fill=tk.X)
+
+        # NEW: Highlight Abbreviations Toggle
+        self.highlight_abbreviations_checkbutton = ttk.Checkbutton(
+            nav_frame,
+            text="Highlight Abbreviations",
+            variable=self.highlight_abbreviations_var,
+            command=self.on_highlight_abbreviations_toggle
+        )
+        self.highlight_abbreviations_checkbutton.pack(side="left", padx=5)
+
         actions_frame = ttk.Labelframe(controls_main_frame, text="Search & Actions", padding=(10,5))
         actions_frame.pack(pady=5, fill=tk.X, expand=True)
-
+        
         search_fields_frame = ttk.Frame(actions_frame)
         search_fields_frame.pack(fill=tk.X, pady=2)
 # --- MODIFIED: Removed 'Go' buttons, adjusted packing for entries ---
@@ -321,7 +331,6 @@ class QPostViewer:
         self.tools_menu_button["menu"] = self.tools_menu
         
         self.tools_menu.add_command(label="Gematria Calc", command=self.show_gematria_calculator_window)
-        self.tools_menu.add_checkbutton(label="Highlight Abbreviations", variable=self.highlight_abbreviations_var, command=self.on_highlight_abbreviations_toggle)
         self.tools_menu.add_command(label="Content Sync", command=self.show_download_window)
         self.tools_menu.add_command(label="Help & Info", command=self.show_help_window)
 
@@ -969,7 +978,7 @@ class QPostViewer:
 
         results = self.df_all_posts[
             (self.df_all_posts['Text'].str.lower().str.contains(keyword_lower, na=False, regex=False)) |
-            (self.df_all_posts['Themes'].apply(lambda x: isinstance(x, list) and any(keyword_lower in theme.lower() for theme in x)))
+            (self.df_all_posts['Tripcode'].str.lower().str.contains(keyword_lower, na=False, regex=False)) # Themes search removed from here
         ]
         
         self._handle_search_results(results, f"Search = '{keyword}'") # Updated search term string
@@ -1468,8 +1477,8 @@ class QPostViewer:
 
         # Enable standard Tkinter text widget context menu (cut/copy/paste)
         # This makes the default right-click menu available.
-        note_text_widget.bind_class("Text", "<Button-3>", utils._show_text_widget_context_menu)
-        note_text_widget.bind_class("Text", "<Control-v>", lambda e: note_text_widget.event_generate("<<Paste>>"))
+        note_text_widget.bind("<Button-3>", utils._show_text_widget_context_menu) # Changed bind_class to bind
+        note_text_widget.bind("<Control-v>", lambda e: note_text_widget.event_generate("<<Paste>>"))
 
 
         # Checkbox for Tooltip
@@ -2577,6 +2586,7 @@ class QPostViewer:
         self.post_text_area.tag_configure("image_val", font=(default_font_name, 10))
         
         self.post_text_area.tag_configure("abbreviation_tag", underline=False) # Theme methods set actual colors
+        self.post_text_area.tag_configure("search_highlight_tag", background="#FFFF00", foreground="black")
 
         self.post_text_area.tag_configure("clickable_link_style", underline=True)
         def show_hand_cursor(event): event.widget.config(cursor="hand2")
@@ -2725,7 +2735,10 @@ class QPostViewer:
     def update_display(self):
         for widget in self.image_display_frame.winfo_children(): widget.destroy()
         self.displayed_images_references = []; self._quote_image_references = []; self.current_post_urls = []; self.current_post_downloaded_article_path = None
-        self.post_text_area.config(state=tk.NORMAL); self.post_text_area.delete(1.0, tk.END)
+        self.post_text_area.config(state=tk.NORMAL); 
+        self.post_text_area.delete(1.0, tk.END)
+        self.post_text_area.tag_remove("search_highlight_tag", "1.0", tk.END)
+        
         show_images = True
         if self.df_displayed is None or self.df_displayed.empty or not (0 <= self.current_display_idx < len(self.df_displayed)):
             self.show_welcome_message(); return
@@ -2821,6 +2834,7 @@ class QPostViewer:
 
 # --- MODIFIED: Use the new helper to insert text with abbreviations and URLs ---
                 self._insert_text_with_abbreviations_and_urls(self.post_text_area, ref_text_content_raw, ("quoted_ref_text_body",), f"qref_{original_df_index}_{ref_idx}")
+                
                 self.post_text_area.insert(tk.END, "\n")
             self.post_text_area.insert(tk.END, "\n")
         
@@ -2828,7 +2842,19 @@ class QPostViewer:
         main_text_content_raw = post.get('Text', '')
         self.post_text_area.insert(tk.END, "Post Text:\n", ("bold_label"))
         self._insert_text_with_abbreviations_and_urls(self.post_text_area, main_text_content_raw, (), f"main_{original_df_index}")
-        
+        if self.current_search_active:
+            search_keyword = self.keyword_entry.get().strip().lower()
+            # Ensure the placeholder text is not treated as a search term
+            if search_keyword and search_keyword != config.PLACEHOLDER_KEYWORD.lower():
+                # Iterate through the entire text area content to find matches
+                start_pos = "1.0"
+                while True:
+                    start_pos = self.post_text_area.search(search_keyword, start_pos, stopindex=tk.END, nocase=True)
+                    if not start_pos:
+                        break
+                    end_pos = f"{start_pos}+{len(search_keyword)}c"
+                    self.post_text_area.tag_add("search_highlight_tag", start_pos, end_pos)
+                    start_pos = end_pos
         if show_images:
             images_json_data = post.get('ImagesJSON', [])
             if images_json_data and isinstance(images_json_data, list) and len(images_json_data) > 0:
