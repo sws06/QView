@@ -153,6 +153,12 @@ class QPostViewer:
         self.post_tree.bind("<Leave>", self._on_treeview_leave_for_tooltip)
 # --- END TREEVIEW_NOTE_TOOLTIP_SETUP ---
 
+# --- START TREEVIEW_NOTE_TOOLTIP_SETUP ---
+        self.treeview_note_tooltip = Tooltip(self.post_tree, self._get_note_tooltip_text, delay=500)
+        self.post_tree.bind("<Motion>", self._on_treeview_motion_for_tooltip)
+        self.post_tree.bind("<Leave>", self._on_treeview_leave_for_tooltip)
+# --- END TREEVIEW_NOTE_TOOLTIP_SETUP ---
+
 # --- Right Pane (Text Area + Image Display) with Panedwindow ---
 
         self.details_outer_frame = ttk.Frame(root)
@@ -1501,6 +1507,43 @@ class QPostViewer:
         note_popup.protocol("WM_DELETE_WINDOW", cancel_and_close)
 
 # --- END USER_NOTES_METHODS ---
+
+# --- START TREEVIEW_MOTION_LEAVE_FOR_TOOLTIP ---
+
+    def _on_treeview_motion_for_tooltip(self, event):
+        """Handle mouse motion over treeview to show/hide note tooltips."""
+        # Hide any existing tooltip first
+        self.treeview_note_tooltip.hidetip()
+
+        # Get the item (row) under the mouse
+        item = self.post_tree.identify_row(event.y)
+
+        # Check if an item (row) is identified
+        if item:
+            original_df_index = item # Treeview iid is the original DataFrame index
+            note_data = self.user_notes.get(original_df_index)
+
+            # Check if there's note data, if tooltip is enabled, and if content exists
+            if note_data and note_data.get("show_tooltip", True) and note_data.get("content", "").strip():
+                # Store enough info to retrieve the content later
+                self.treeview_note_tooltip.text_generator = \
+                    lambda idx=original_df_index: self.user_notes.get(idx, {}).get("content", "").strip()
+                self.treeview_note_tooltip.schedule() # Show tooltip
+            else:
+                self.treeview_note_tooltip.unschedule() # Hide if no valid note/tooltip disabled
+        else:
+            self.treeview_note_tooltip.unschedule() # Not over any item
+
+    def _on_treeview_leave_for_tooltip(self, event):
+        """Handle mouse leaving treeview to hide note tooltips."""
+        self.treeview_note_tooltip.unschedule()
+        self.treeview_note_tooltip.hidetip()
+
+    def _get_note_tooltip_text(self):
+        # This is a placeholder; the text_generator is updated in _on_treeview_motion_for_tooltip
+        # when a specific item is identified.
+        return "" 
+# --- END TREEVIEW_MOTION_LEAVE_FOR_TOOLTIP ---
 
 # --- START TREEVIEW_MOTION_LEAVE_FOR_TOOLTIP ---
 

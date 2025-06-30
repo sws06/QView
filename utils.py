@@ -256,6 +256,20 @@ def _show_text_widget_context_menu(event):
     # Display the menu
     menu.tk_popup(event.x_root, event.y_root)    
 
+def _show_text_widget_context_menu(event):
+    """Binds a right-click event to show the default Tkinter Text widget context menu."""
+    widget = event.widget
+    # Create a temporary menu
+    menu = tk.Menu(widget, tearoff=0)
+
+    # Add standard commands
+    menu.add_command(label="Cut", command=lambda: widget.event_generate("<<Cut>>"))
+    menu.add_command(label="Copy", command=lambda: widget.event_generate("<<Copy>>"))
+    menu.add_command(label="Paste", command=lambda: widget.event_generate("<<Paste>>"))
+
+    # Display the menu
+    menu.tk_popup(event.x_root, event.y_root)
+
 # --- END NEW AND CORRECTED FUNCTIONS ---
 
 
