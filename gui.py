@@ -302,6 +302,8 @@ class QPostViewer:
         self.view_bookmarks_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
         self.view_edit_note_button = ttk.Button(current_post_actions_frame, text="View/Edit Note", command=self.show_note_popup, state=tk.DISABLED)
         self.view_edit_note_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        self.view_context_button = ttk.Button(current_post_actions_frame, text="View Context", command=self.show_context_chain_viewer_window, state=tk.DISABLED)
+        self.view_context_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
 
 # --- MODIFIED: Consolidated Bottom Buttons per user request ---
         bottom_main_bar_frame = ttk.Frame(controls_main_frame)
@@ -372,6 +374,131 @@ class QPostViewer:
         self._init_complete = True
 
 # --- END __INIT__ ---
+
+# --- START _PREVENT_TEXT_EDIT ---
+
+    def _prevent_text_edit(self, event):
+        if event.state & 0x0004: # If Control key is pressed
+            if event.keysym.lower() == 'c': return # Allow Ctrl+C
+            if event.keysym.lower() == 'a': return # Allow Ctrl+A
+        allowed_nav_keys = ["Left", "Right", "Up", "Down", "Prior", "Next", "Home", "End",
+                            "Control_L", "Control_R", "Shift_L", "Shift_R", "Alt_L", "Alt_R",
+                            "leftarrow", "rightarrow", "uparrow", "downarrow", "PageUp", "PageDown"]
+        if event.keysym in allowed_nav_keys: return
+        return "break"
+
+# --- END _PREVENT_TEXT_EDIT ---
+
+# --- START _INSERT_TEXT_WITH_CLICKABLE_URLS ---
+
+    # This helper now ONLY handles clickable URLs.
+    def _insert_text_with_clickable_urls(self, text_widget, text_content_raw, base_tags_tuple, link_event_tag_prefix):
+        if pd.isna(text_content_raw) or not str(text_content_raw).strip():
+            text_widget.insert(tk.END, "", base_tags_tuple if base_tags_tuple else ())
+            return
+        text_content = utils.sanitize_text_for_tkinter(text_content_raw)
+        if not isinstance(text_content, str) or not text_content.strip():
+            text_widget.insert(tk.END, str(text_content) if pd.notna(text_content) else "", base_tags_tuple if base_tags_tuple else ())
+            return
+
+        last_end = 0
+        for url_match in config.URL_REGEX.finditer(text_content):
+            start, end = url_match.span()
+            if start > last_end:
+                text_widget.insert(tk.END, text_content[last_end:start], base_tags_tuple)
+
+            url = url_match.group(0)
+            clickable_tag_instance = f"{link_event_tag_prefix}_url_{url_match.start()}"
+            current_tags = list(base_tags_tuple) if base_tags_tuple else []
+            current_tags.extend(['clickable_link_style', clickable_tag_instance])
+
+            text_widget.insert(tk.END, url, tuple(current_tags))
+            text_widget.tag_bind(clickable_tag_instance, "<Button-1>", lambda e, u=url: utils.open_link_with_preference(u, self.app_settings))
+            last_end = end
+
+        if last_end < len(text_content):
+            text_widget.insert(tk.END, text_content[last_end:], base_tags_tuple)
+
+# --- END _INSERT_TEXT_WITH_CLICKABLE_URLS ---
+
+# --- START _INSERT_TEXT_WITH_ABBREVIATIONS_AND_URLS ---
+
+    def _insert_text_with_abbreviations_and_urls(self, text_widget, text_content_raw, base_tags_tuple, post_id_for_tagging):
+        if pd.isna(text_content_raw) or not str(text_content_raw).strip():
+            text_widget.insert(tk.END, "", base_tags_tuple if base_tags_tuple else ())
+            return
+
+        text_content = utils.sanitize_text_for_tkinter(text_content_raw)
+        if not isinstance(text_content, str) or not text_content.strip():
+            text_widget.insert(tk.END, str(text_content) if pd.notna(text_content) else "", base_tags_tuple if base_tags_tuple else ())
+            return
+
+        highlight_enabled = self.highlight_abbreviations_var.get()
+
+        # This will store (start_char_idx, end_char_idx, abbreviation_text, is_bracketed) tuples
+        abbreviation_spans = []
+
+        # 1. Find all potential abbreviations
+        # Sorted keys for greedy matching of longer abbreviations first
+        sorted_abbreviations = sorted(config.Q_ABBREVIATIONS.keys(), key=len, reverse=True)
+
+        for abbr in sorted_abbreviations:
+        # Pattern for standalone abbreviation (word boundary)
+        # Using re.escape to handle special characters in abbreviations
+            standalone_pattern = r'\b' + re.escape(abbr) + r'\b'
+            for match in re.finditer(standalone_pattern, text_content):
+                abbreviation_spans.append((match.start(), match.end(), abbr, False))
+
+        # Pattern for bracketed abbreviation
+            bracketed_pattern = r'\[' + re.escape(abbr) + r'\]'
+            for match in re.finditer(bracketed_pattern, text_content):
+                abbreviation_spans.append((match.start(), match.end(), abbr, True))
+
+        # Sort spans by their start index. If start indices are the same, longer matches first.
+        abbreviation_spans.sort(key=lambda x: (x[0], -x[1]))
+
+        # Filter overlapping matches, prioritizing longer ones that start earlier
+        non_overlapping_abbreviations = []
+        last_added_end = -1
+        for start, end, abbr_text, is_bracketed in abbreviation_spans:
+            if start >= last_added_end:
+                non_overlapping_abbreviations.append((start, end, abbr_text, is_bracketed))
+                last_added_end = end
+            else:
+        # If this abbreviation is completely contained within the last added one, skip.
+        # If it's a partial overlap, the sorting already prioritized the "best" (longest-starting-earliest).
+                pass
+
+        # 2. Iterate through text and apply tags
+        current_pos = 0
+
+        # Iterate through the content, processing segments between abbreviations, and then the abbreviations themselves.
+        # This will also handle URLs within non-abbreviation text segments by calling _insert_text_with_clickable_urls.
+        for start, end, abbr_text, is_bracketed in non_overlapping_abbreviations:
+        # Insert text before the current abbreviation match
+            if start > current_pos:
+                segment = text_content[current_pos:start]
+                self._insert_text_with_clickable_urls(text_widget, segment, base_tags_tuple, f"{post_id_for_tagging}_seg_{current_pos}")
+
+        # Insert the abbreviation with its specific tags
+            matched_abbr_full_text = text_content[start:end] # e.g., "ROTH" or "[ROTH]"
+
+            abbr_tags = list(base_tags_tuple)
+            if highlight_enabled:
+                abbr_tags.append('abbreviation_tag')
+
+        # For the purpose of applying the context menu, we can bind to the entire text area
+        # and use index. But to apply specific tags for highlighting, we insert.
+            text_widget.insert(tk.END, matched_abbr_full_text, tuple(abbr_tags))
+
+            current_pos = end
+
+        # Insert any remaining text after the last abbreviation
+        if current_pos < len(text_content):
+            segment = text_content[current_pos:]
+            self._insert_text_with_clickable_urls(text_widget, segment, base_tags_tuple, f"{post_id_for_tagging}_final_{current_pos}")
+
+# --- END _INSERT_TEXT_WITH_ABBREVIATIONS_AND_URLS ---
 
 # --- START UPDATE_DISPLAY ---
 
@@ -1416,6 +1543,21 @@ class QPostViewer:
         original_df_index = self.df_displayed.index[self.current_display_idx]
         self.bookmark_button.config(text="Unbookmark This Post" if original_df_index in self.bookmarked_posts else "Bookmark This Post")
 
+
+    # --- START UPDATE_CONTEXT_BUTTON_STATE ---
+    def _update_context_button_state(self):
+        if hasattr(self, 'view_context_button'):
+            if self.df_displayed is not None and not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed):
+                original_df_index = self.df_displayed.index[self.current_display_idx]
+                current_post_num = self.df_all_posts.loc[original_df_index].get('Post Number')
+                if pd.notna(current_post_num):
+                    self.view_context_button.config(state=tk.NORMAL)
+                else:
+                    self.view_context_button.config(state=tk.DISABLED)
+            else:
+                self.view_context_button.config(state=tk.DISABLED)
+    # --- END UPDATE_CONTEXT_BUTTON_STATE ---
+
     def view_bookmarked_gui_posts(self):
         if not self.bookmarked_posts:
             messagebox.showinfo("Bookmarks", "No posts bookmarked yet.", parent=self.root)
@@ -2051,6 +2193,275 @@ class QPostViewer:
 
 # --- END SHOW_HELP_WINDOW ---
 
+# --- START CONTEXT_CHAIN_VIEWER_WINDOW ---
+
+    def show_context_chain_viewer_window(self):
+        # Ensure only one instance of the context window
+        if hasattr(self, 'context_chain_win') and self.context_chain_win is not None and self.context_chain_win.winfo_exists():
+            self.context_chain_win.lift()
+            self.context_chain_win.focus_set()
+        else:
+            self.context_chain_win = tk.Toplevel(self.root)
+            self.context_chain_win.title("Context Chain Viewer") # Initial title, will update
+            try:
+                dialog_bg = self.style.lookup("TFrame", "background")
+                text_bg = self.style.lookup("TEntry", "fieldbackground")
+                text_fg = self.style.lookup("TEntry", "foreground")
+                link_fg = self.link_label_fg_dark if self.current_theme == "dark" else self.link_label_fg_light
+            except tk.TclError:
+                dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
+                text_bg = "#3c3f41" if self.current_theme == "dark" else "#ffffff"
+                text_fg = "#e0e0e0" if self.current_theme == "dark" else "#000000"
+                link_fg = "#6DAEFF" if self.current_theme == "dark" else "#0056b3"
+
+            self.context_chain_win.configure(bg=dialog_bg)
+
+            self.context_chain_win.geometry("500x700") # Adjust size as needed
+            # REMOVED: self.context_chain_win.transient(self.root) # Make it non-modal
+            # REMOVED: self.context_chain_win.grab_set() # Make it non-modal
+
+            main_frame = ttk.Frame(self.context_chain_win, padding="10")
+            main_frame.pack(expand=True, fill=tk.BOTH)
+
+            # Use a Text widget to display formatted content
+            self.context_text_area = tk.Text(main_frame, wrap=tk.WORD, # Made instance variable
+                                   relief=tk.FLAT, borderwidth=1, font=("TkDefaultFont", 10),
+                                   padx=10, pady=10)
+            self.context_text_area.configure(bg=text_bg, fg=text_fg, insertbackground=text_fg, selectbackground=self.style.lookup("Treeview", "selectbackground"))
+            context_text_scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=self.context_text_area.yview)
+            self.context_text_area.configure(yscrollcommand=context_text_scrollbar.set)
+
+            self.context_text_area.pack(side="left", fill="both", expand=True)
+            context_text_scrollbar.pack(side="right", fill="y")
+
+            # Configure clickable link tag for the context viewer
+            self.context_text_area.tag_configure("clickable_context_link", foreground=link_fg, underline=True)
+            # Need to use specific lambda to capture self.context_text_area
+            def show_hand_cursor(event): self.context_text_area.config(cursor="hand2")
+            def show_arrow_cursor(event): self.context_text_area.config(cursor="arrow")
+            self.context_text_area.tag_bind("clickable_context_link", "<Enter>", show_hand_cursor)
+            self.context_text_area.tag_bind("clickable_context_link", "<Leave>", show_arrow_cursor)
+            # Configure bold tag for section headers
+            self.context_text_area.tag_configure("bold", font=("TkDefaultFont", 10, "bold"))
+
+            # Add a close button within the window
+            ttk.Button(main_frame, text="Close", command=self.context_chain_win.destroy).pack(side=tk.BOTTOM, pady=10)
+
+        # Now, populate or update the content based on the current post
+        self._update_context_chain_content()
+
+
+        # --- Populate Context Chain ---
+        context_text_area.config(state=tk.NORMAL) # Enable editing to insert text
+        
+        context_text_area.insert(tk.END, f"Context for Post #{int(current_post_num) if pd.notna(current_post_num) else 'N/A'}\n\n", "bold")
+
+        # Posts Quoted by This Post
+        quoted_by_this_post = app_data.post_quotes_map.get(current_post_num, [])
+        if quoted_by_this_post:
+            context_text_area.insert(tk.END, "Posts Quoted by This Post:\n", "bold")
+            for i, p_num in enumerate(quoted_by_this_post):
+                tag = f"quoted_link_{p_num}_{i}"
+                context_text_area.insert(tk.END, f"  >>{p_num}\n", ("clickable_context_link", tag))
+                context_text_area.tag_bind(tag, "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+        else:
+            context_text_area.insert(tk.END, "Posts Quoted by This Post:\n", "bold")
+            context_text_area.insert(tk.END, "  None\n")
+        context_text_area.insert(tk.END, "\n")
+
+        # Posts Quoting This Post (Reverse Lookup)
+        posts_quoting_this = app_data.post_quoted_by_map.get(current_post_num, [])
+        if posts_quoting_this:
+            context_text_area.insert(tk.END, "Posts Quoting This Post:\n", "bold")
+            for i, p_num in enumerate(posts_quoting_this):
+                tag = f"quoting_link_{p_num}_{i}"
+                context_text_area.insert(tk.END, f"  >>{p_num}\n", ("clickable_context_link", tag))
+                context_text_area.tag_bind(tag, "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+        else:
+            context_text_area.insert(tk.END, "Posts Quoting This Post:\n", "bold")
+            context_text_area.insert(tk.END, "  None\n")
+        context_text_area.insert(tk.END, "\n")
+        
+        # --- NEW: Delta Matches ---
+        current_date = current_post.get('Datetime_UTC')
+        if pd.notna(current_date):
+            delta_matches = self.df_all_posts[
+                (self.df_all_posts['Datetime_UTC'].dt.month == current_date.month) &
+                (self.df_all_posts['Datetime_UTC'].dt.day == current_date.day) &
+                (self.df_all_posts['Post Number'] != current_post_num) # Exclude current post itself
+            ].sort_values(by='Post Number')['Post Number'].tolist()
+
+            context_text_area.insert(tk.END, "Delta Matches (Same Month/Day):\n", "bold")
+            if delta_matches:
+                for i, p_num in enumerate(delta_matches):
+                    tag = f"delta_link_{p_num}_{i}"
+                    context_text_area.insert(tk.END, f"  >>{p_num}\n", ("clickable_context_link", tag))
+                    context_text_area.tag_bind(tag, "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+            else:
+                context_text_area.insert(tk.END, "  None\n")
+        else:
+            context_text_area.insert(tk.END, "Delta Matches: (No date for current post)\n  None\n", "bold")
+        context_text_area.insert(tk.END, "\n")
+
+        # --- NEW: Shared Themes ---
+        current_themes = current_post.get('Themes', [])
+        if current_themes and isinstance(current_themes, list):
+            # Find posts that share at least one theme with the current post
+            shared_theme_posts_df = self.df_all_posts[
+                self.df_all_posts['Themes'].apply(
+                    lambda themes: any(t in current_themes for t in themes) if isinstance(themes, list) else False
+                ) & (self.df_all_posts['Post Number'] != current_post_num) # Exclude current post
+            ].sort_values(by='Post Number')
+
+            context_text_area.insert(tk.END, "Shared Themes:\n", "bold")
+            if not shared_theme_posts_df.empty:
+                # Group by theme for better display
+                for theme_key in current_themes:
+                    related_posts_for_theme = shared_theme_posts_df[
+                        shared_theme_posts_df['Themes'].apply(lambda themes: theme_key in themes if isinstance(themes, list) else False)
+                    ]['Post Number'].tolist()
+                    
+                    if related_posts_for_theme:
+                        # Convert internal theme key to human-readable for display
+                        display_theme_name = " ".join(word.capitalize() for word in theme_key.split('_'))
+                        context_text_area.insert(tk.END, f"  {display_theme_name}: ", "bold")
+                        for i, p_num in enumerate(related_posts_for_theme):
+                            tag = f"theme_link_{p_num}_{theme_key}_{i}"
+                            context_text_area.insert(tk.END, f">> {p_num}", ("clickable_context_link", tag))
+                            context_text_area.tag_bind(tag, "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+                            if i < len(related_posts_for_theme) - 1:
+                                context_text_area.insert(tk.END, ", ")
+                        context_text_area.insert(tk.END, "\n")
+            else:
+                context_text_area.insert(tk.END, "  None\n")
+        else:
+            context_text_area.insert(tk.END, "Shared Themes: (No themes for current post)\n  None\n", "bold")
+        context_text_area.insert(tk.END, "\n")
+        
+        context_text_area.insert(tk.END, "Shared Killbox Markers: (Coming Soon)\n  None\n\n", "bold")
+
+        context_text_area.config(state=tk.DISABLED) # Disable editing after populating
+# --- END CONTEXT_CHAIN_VIEWER_WINDOW ---
+       
+# --- START UPDATE_CONTEXT_CHAIN_CONTENT ---
+    def _update_context_chain_content(self):
+        if not (hasattr(self, 'context_chain_win') and self.context_chain_win is not None and self.context_chain_win.winfo_exists()):
+            return # Window not open
+
+        if self.df_displayed is None or self.df_displayed.empty or not (0 <= self.current_display_idx < len(self.df_displayed)):
+            self.context_chain_win.title("Context Chain Viewer (No Post Selected)")
+            self.context_text_area.config(state=tk.NORMAL)
+            self.context_text_area.delete(1.0, tk.END)
+            self.context_text_area.insert(tk.END, "Please select a post in the main viewer to display its context chain.\n\n", "bold")
+            self.context_text_area.config(state=tk.DISABLED)
+            return
+
+        original_df_index = self.df_displayed.index[self.current_display_idx]
+        current_post = self.df_all_posts.loc[original_df_index]
+        current_post_num = current_post.get('Post Number')
+
+        if not pd.notna(current_post_num):
+            self.context_chain_win.title("Context Chain Viewer (Invalid Post Number)")
+            self.context_text_area.config(state=tk.NORMAL)
+            self.context_text_area.delete(1.0, tk.END)
+            self.context_text_area.insert(tk.END, "Selected post has no valid Post Number for context tracing.\n\n", "bold")
+            self.context_text_area.config(state=tk.DISABLED)
+            return
+
+        self.context_chain_win.title(f"Context Chain for Post #{int(current_post_num)}")
+        self.context_text_area.config(state=tk.NORMAL) # Enable editing to insert text
+        self.context_text_area.delete(1.0, tk.END) # Clear previous content
+
+        self.context_text_area.insert(tk.END, f"Context for Post #{int(current_post_num) if pd.notna(current_post_num) else 'N/A'}\n\n", "bold")
+
+        # Posts Quoted by This Post
+        quoted_by_this_post = app_data.post_quotes_map.get(current_post_num, [])
+        if quoted_by_this_post:
+            self.context_text_area.insert(tk.END, "Posts Quoted by This Post:\n", "bold")
+            for i, p_num in enumerate(quoted_by_this_post):
+                tag = f"quoted_link_{p_num}_{i}"
+                self.context_text_area.insert(tk.END, f"  >>{p_num}\n", ("clickable_context_link", tag))
+                self.context_text_area.tag_bind(tag, "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+        else:
+            self.context_text_area.insert(tk.END, "Posts Quoted by This Post:\n", "bold")
+            self.context_text_area.insert(tk.END, "  None\n")
+        self.context_text_area.insert(tk.END, "\n")
+
+        # Posts Quoting This Post (Reverse Lookup)
+        posts_quoting_this = app_data.post_quoted_by_map.get(current_post_num, [])
+        if posts_quoting_this:
+            self.context_text_area.insert(tk.END, "Posts Quoting This Post:\n", "bold")
+            for i, p_num in enumerate(posts_quoting_this):
+                tag = f"quoting_link_{p_num}_{i}"
+                self.context_text_area.insert(tk.END, f"  >>{p_num}\n", ("clickable_context_link", tag))
+                self.context_text_area.tag_bind(tag, "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+        else:
+            self.context_text_area.insert(tk.END, "Posts Quoting This Post:\n", "bold")
+            self.context_text_area.insert(tk.END, "  None\n")
+        self.context_text_area.insert(tk.END, "\n")
+
+        # --- NEW: Delta Matches ---
+        current_date = current_post.get('Datetime_UTC')
+        if pd.notna(current_date):
+            delta_matches = self.df_all_posts[
+                (self.df_all_posts['Datetime_UTC'].dt.month == current_date.month) &
+                (self.df_all_posts['Datetime_UTC'].dt.day == current_date.day) &
+                (self.df_all_posts['Post Number'] != current_post_num) # Exclude current post itself
+            ].sort_values(by='Post Number')['Post Number'].tolist()
+
+            self.context_text_area.insert(tk.END, "Delta Matches (Same Month/Day):\n", "bold")
+            if delta_matches:
+                for i, p_num in enumerate(delta_matches):
+                    tag = f"delta_link_{p_num}_{i}"
+                    self.context_text_area.insert(tk.END, f"  >>{p_num}\n", ("clickable_context_link", tag))
+                    self.context_text_area.tag_bind(tag, "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+            else:
+                self.context_text_area.insert(tk.END, "  None\n")
+        else:
+            self.context_text_area.insert(tk.END, "Delta Matches: (No date for current post)\n  None\n", "bold")
+        self.context_text_area.insert(tk.END, "\n")
+
+        # --- NEW: Shared Themes ---
+        current_themes = current_post.get('Themes', [])
+        if current_themes and isinstance(current_themes, list):
+            # Find posts that share at least one theme with the current post
+            shared_theme_posts_df = self.df_all_posts[
+                self.df_all_posts['Themes'].apply(
+                    lambda themes: any(t in current_themes for t in themes) if isinstance(themes, list) else False
+                ) & (self.df_all_posts['Post Number'] != current_post_num) # Exclude current post
+            ].sort_values(by='Post Number')
+
+            self.context_text_area.insert(tk.END, "Shared Themes:\n", "bold")
+            if not shared_theme_posts_df.empty:
+                # Group by theme for better display
+                for theme_key in current_themes:
+                    related_posts_for_theme = shared_theme_posts_df[
+                        shared_theme_posts_df['Themes'].apply(lambda themes: theme_key in themes if isinstance(themes, list) else False)
+                    ]['Post Number'].tolist()
+
+                    if related_posts_for_theme:
+                        # Convert internal theme key to human-readable for display
+                        display_theme_name = " ".join(word.capitalize() for word in theme_key.split('_'))
+                        self.context_text_area.insert(tk.END, f"  {display_theme_name}: ", "bold")
+                        for i, p_num in enumerate(related_posts_for_theme):
+                            tag = f"theme_link_{p_num}_{theme_key}_{i}"
+                            self.context_text_area.insert(tk.END, f">> {p_num}", ("clickable_context_link", tag))
+                            self.context_text_area.tag_bind(tag, "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+                            if i < len(related_posts_for_theme) - 1:
+                                self.context_text_area.insert(tk.END, ", ")
+                        self.context_text_area.insert(tk.END, "\n")
+            else:
+                self.context_text_area.insert(tk.END, "  None\n")
+        else:
+            self.context_text_area.insert(tk.END, "Shared Themes: (No themes for current post)\n  None\n", "bold")
+        self.context_text_area.insert(tk.END, "\n")
+
+        self.context_text_area.insert(tk.END, "Shared Killbox Markers: (Coming Soon)\n  None\n\n", "bold")
+
+        self.context_text_area.config(state=tk.DISABLED) # Disable editing after populating
+# --- END UPDATE_CONTEXT_CHAIN_CONTENT ---    
+    
+    
     def show_gematria_calculator_window(self, initial_text=""):
         """Creates and shows a standalone window for Gematria calculations."""
         if hasattr(self, 'gematria_win') and self.gematria_win.winfo_exists():
@@ -2196,6 +2607,7 @@ class QPostViewer:
                        new_display_idx != self.current_display_idx or welcome_was_showing):
                         self.current_display_idx = new_display_idx # Update current index HERE
                         self.update_display()
+                        self._update_context_chain_content() # NEW: Update context window content
             except ValueError: 
                 print(f"Error: Tree iid '{selected_iid_str}' not a valid integer for index.")
             except Exception as e: 
@@ -2605,130 +3017,7 @@ class QPostViewer:
 
 # --- END CONFIGURE_TEXT_TAGS ---
 
-# --- START _PREVENT_TEXT_EDIT ---
 
-    def _prevent_text_edit(self, event):
-        if event.state & 0x0004: # If Control key is pressed
-            if event.keysym.lower() == 'c': return # Allow Ctrl+C
-            if event.keysym.lower() == 'a': return # Allow Ctrl+A
-        allowed_nav_keys = ["Left", "Right", "Up", "Down", "Prior", "Next", "Home", "End",
-                            "Control_L", "Control_R", "Shift_L", "Shift_R", "Alt_L", "Alt_R",
-                            "leftarrow", "rightarrow", "uparrow", "downarrow", "PageUp", "PageDown"]
-        if event.keysym in allowed_nav_keys: return
-        return "break"
-
-# --- END _PREVENT_TEXT_EDIT ---
-
-# --- START _INSERT_TEXT_WITH_CLICKABLE_URLS ---
-
-    # This helper now ONLY handles clickable URLs.
-    def _insert_text_with_clickable_urls(self, text_widget, text_content_raw, base_tags_tuple, link_event_tag_prefix):
-        if pd.isna(text_content_raw) or not str(text_content_raw).strip():
-            text_widget.insert(tk.END, "", base_tags_tuple if base_tags_tuple else ())
-            return
-        text_content = utils.sanitize_text_for_tkinter(text_content_raw)
-        if not isinstance(text_content, str) or not text_content.strip():
-            text_widget.insert(tk.END, str(text_content) if pd.notna(text_content) else "", base_tags_tuple if base_tags_tuple else ())
-            return
-
-        last_end = 0
-        for url_match in config.URL_REGEX.finditer(text_content):
-            start, end = url_match.span()
-            if start > last_end:
-                text_widget.insert(tk.END, text_content[last_end:start], base_tags_tuple)
-            
-            url = url_match.group(0)
-            clickable_tag_instance = f"{link_event_tag_prefix}_url_{url_match.start()}"
-            current_tags = list(base_tags_tuple) if base_tags_tuple else []
-            current_tags.extend(['clickable_link_style', clickable_tag_instance])
-            
-            text_widget.insert(tk.END, url, tuple(current_tags))
-            text_widget.tag_bind(clickable_tag_instance, "<Button-1>", lambda e, u=url: utils.open_link_with_preference(u, self.app_settings))
-            last_end = end
-        
-        if last_end < len(text_content):
-            text_widget.insert(tk.END, text_content[last_end:], base_tags_tuple)
-
-# --- END _INSERT_TEXT_WITH_CLICKABLE_URLS ---
-
-# --- START _INSERT_TEXT_WITH_ABBREVIATIONS_AND_URLS ---
-
-    def _insert_text_with_abbreviations_and_urls(self, text_widget, text_content_raw, base_tags_tuple, post_id_for_tagging):
-        if pd.isna(text_content_raw) or not str(text_content_raw).strip():
-            text_widget.insert(tk.END, "", base_tags_tuple if base_tags_tuple else ())
-            return
-
-        text_content = utils.sanitize_text_for_tkinter(text_content_raw)
-        if not isinstance(text_content, str) or not text_content.strip():
-            text_widget.insert(tk.END, str(text_content) if pd.notna(text_content) else "", base_tags_tuple if base_tags_tuple else ())
-            return
-
-        highlight_enabled = self.highlight_abbreviations_var.get()
-        
-# This will store (start_char_idx, end_char_idx, abbreviation_text, is_bracketed) tuples
-        abbreviation_spans = []
-
-# 1. Find all potential abbreviations
-# Sorted keys for greedy matching of longer abbreviations first
-        sorted_abbreviations = sorted(config.Q_ABBREVIATIONS.keys(), key=len, reverse=True)
-
-        for abbr in sorted_abbreviations:
-# Pattern for standalone abbreviation (word boundary)
-# Using re.escape to handle special characters in abbreviations
-            standalone_pattern = r'\b' + re.escape(abbr) + r'\b'
-            for match in re.finditer(standalone_pattern, text_content):
-                abbreviation_spans.append((match.start(), match.end(), abbr, False))
-            
-# Pattern for bracketed abbreviation
-            bracketed_pattern = r'\[' + re.escape(abbr) + r'\]'
-            for match in re.finditer(bracketed_pattern, text_content):
-                abbreviation_spans.append((match.start(), match.end(), abbr, True))
-
-# Sort spans by their start index. If start indices are the same, longer matches first.
-        abbreviation_spans.sort(key=lambda x: (x[0], -x[1]))
-
-# Filter overlapping matches, prioritizing longer ones that start earlier
-        non_overlapping_abbreviations = []
-        last_added_end = -1
-        for start, end, abbr_text, is_bracketed in abbreviation_spans:
-            if start >= last_added_end:
-                non_overlapping_abbreviations.append((start, end, abbr_text, is_bracketed))
-                last_added_end = end
-            else:
-# If this abbreviation is completely contained within the last added one, skip.
-# If it's a partial overlap, the sorting already prioritized the "best" (longest-starting-earliest).
-                pass
-
-# 2. Iterate through text and apply tags
-        current_pos = 0
-        
-# Iterate through the content, processing segments between abbreviations, and then the abbreviations themselves.
-# This will also handle URLs within non-abbreviation text segments by calling _insert_text_with_clickable_urls.
-        for start, end, abbr_text, is_bracketed in non_overlapping_abbreviations:
-# Insert text before the current abbreviation match
-            if start > current_pos:
-                segment = text_content[current_pos:start]
-                self._insert_text_with_clickable_urls(text_widget, segment, base_tags_tuple, f"{post_id_for_tagging}_seg_{current_pos}")
-            
-# Insert the abbreviation with its specific tags
-            matched_abbr_full_text = text_content[start:end] # e.g., "ROTH" or "[ROTH]"
-            
-            abbr_tags = list(base_tags_tuple)
-            if highlight_enabled:
-                abbr_tags.append('abbreviation_tag')
-            
-# For the purpose of applying the context menu, we can bind to the entire text area
-# and use index. But to apply specific tags for highlighting, we insert.
-            text_widget.insert(tk.END, matched_abbr_full_text, tuple(abbr_tags))
-            
-            current_pos = end
-
-# Insert any remaining text after the last abbreviation
-        if current_pos < len(text_content):
-            segment = text_content[current_pos:]
-            self._insert_text_with_clickable_urls(text_widget, segment, base_tags_tuple, f"{post_id_for_tagging}_final_{current_pos}")
-
-# --- END _INSERT_TEXT_WITH_ABBREVIATIONS_AND_URLS ---
 
 # --- START UPDATE_DISPLAY ---
 
@@ -2914,6 +3203,7 @@ class QPostViewer:
         if hasattr(self,'view_edit_note_button'):
             if self.df_displayed is not None and not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed): self.view_edit_note_button.config(state=tk.NORMAL)
             else: self.view_edit_note_button.config(state=tk.DISABLED)
+        self._update_context_button_state()    
         
         if not self.image_display_frame.winfo_children():
             self.details_outer_frame.grid_columnconfigure(1, weight=0)

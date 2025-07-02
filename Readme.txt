@@ -93,5 +93,3 @@ Support Development: If you find QView valuable, consider supporting its ongoing
 7.  **"Contribution & Support" Section:** Replaced the "Coming Soon" list (which is better for a forum thread where future ideas are discussed) with clear ways to contribute and support. Explicitly added GitHub Issues.
 8.  **Overall Tone:** Aimed for less "marketing hype" and more direct, confident description of the tool's capabilities and purpose. Removed redundant "Red-pilled" tag from the bottom.
 9.  **Date:** Updated release to `v1.3` and the year to 2025 (since we are in June 2025 in the prompt context).
-
-This `README.md` should be more effective for new users arriving at your GitHub repository. Let me know what you think!
