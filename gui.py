@@ -2228,7 +2228,7 @@ class QPostViewer:
             self.context_chain_win.focus_set()
         else:
             self.context_chain_win = tk.Toplevel(self.root)
-            self.context_chain_win.title("Context Chain Viewer") # Initial title, will update
+            self.context_chain_win.title("Context Chain Viewer")
             try:
                 dialog_bg = self.style.lookup("TFrame", "background")
                 text_bg = self.style.lookup("TEntry", "fieldbackground")
@@ -2246,28 +2246,28 @@ class QPostViewer:
             main_frame = ttk.Frame(self.context_chain_win, padding="10")
             main_frame.pack(expand=True, fill=tk.BOTH)
 
-            # Use a Text widget to display formatted content
+            # --- Create all widgets first ---
             self.context_text_area = tk.Text(main_frame, wrap=tk.WORD,
                                    relief=tk.FLAT, borderwidth=1, font=("TkDefaultFont", 10),
                                    padx=10, pady=10)
             self.context_text_area.configure(bg=text_bg, fg=text_fg, insertbackground=text_fg, selectbackground=self.style.lookup("Treeview", "selectbackground"))
+            
             context_text_scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=self.context_text_area.yview)
             self.context_text_area.configure(yscrollcommand=context_text_scrollbar.set)
             
-            # Bottom button frame
             button_frame = ttk.Frame(main_frame)
-            button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
-
-            # Add the new "Back" button
             self.context_back_button = ttk.Button(button_frame, text="< Back", command=self.navigate_context_back, state=tk.DISABLED)
+            close_button = ttk.Button(button_frame, text="Close", command=self.context_chain_win.destroy)
+
+            # --- Correctly pack all widgets in order ---
+            button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
             self.context_back_button.pack(side=tk.LEFT, padx=(0, 5), expand=True, fill=tk.X)
-
-            ttk.Button(button_frame, text="Close", command=self.context_chain_win.destroy).pack(side=tk.LEFT, padx=(5, 0), expand=True, fill=tk.X)
-
-            self.context_text_area.pack(side="left", fill="both", expand=True)
-            context_text_scrollbar.pack(side="right", fill="y")
+            close_button.pack(side=tk.LEFT, padx=(5, 0), expand=True, fill=tk.X)
             
-            # Configure clickable link tag for the context viewer
+            context_text_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            self.context_text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            # Configure tags
             self.context_text_area.tag_configure("clickable_context_link", foreground=link_fg, underline=True)
             def show_hand_cursor(event): self.context_text_area.config(cursor="hand2")
             def show_arrow_cursor(event): self.context_text_area.config(cursor="arrow")
@@ -2275,11 +2275,10 @@ class QPostViewer:
             self.context_text_area.tag_bind("clickable_context_link", "<Leave>", show_arrow_cursor)
             self.context_text_area.tag_configure("bold", font=("TkDefaultFont", 10, "bold"))
 
-        # Clear history to start a new trace whenever the main "View Context" button is clicked
+        # Clear history to start a new trace
         self.context_history.clear()
         self._is_navigating_context_back = False
 
-        # Now, populate or update the content based on the current post
         self._update_context_chain_content()
         
 # --- END SHOW_CONTEXT_CHAIN_VIEWER_WINDOW ---
@@ -2287,7 +2286,7 @@ class QPostViewer:
 # --- START UPDATE_CONTEXT_CHAIN_CONTENT ---
     def _update_context_chain_content(self):
         if not (hasattr(self, 'context_chain_win') and self.context_chain_win is not None and self.context_chain_win.winfo_exists()):
-            return # Window not open
+            return
 
         self.context_text_area.config(state=tk.NORMAL)
         self.context_text_area.delete(1.0, tk.END)
@@ -2303,15 +2302,14 @@ class QPostViewer:
         else:
             self._context_tag_refs = []
 
-        # Define a common function for displaying a section
+        # Helper function to display a section of related posts
         def display_section(title, post_list_raw):
             post_list = sorted(post_list_raw)
             self.context_text_area.insert(tk.END, f"{title}:\n", "bold")
 
             if post_list:
                 for i, p_num in enumerate(post_list):
-                    tag_base = f"{title.replace(' ', '_').replace(':', '').replace('/', '_')}_link_{p_num}_{i}"
-                    # Make the link style more obvious with brackets
+                    tag_base = f"{title.replace(' ', '_').replace(':', '').replace('/', '_').replace('.', '_')}_link_{p_num}_{i}"
                     self.context_text_area.insert(tk.END, f"  [>>{p_num}]", ("clickable_context_link", tag_base))
                     self.context_text_area.tag_bind(tag_base, "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
                     
@@ -2329,65 +2327,60 @@ class QPostViewer:
             self.context_text_area.insert(tk.END, "\n")
             
         if self.df_displayed is None or self.df_displayed.empty or not (0 <= self.current_display_idx < len(self.df_displayed)):
-            self.context_chain_win.title("Context Chain Viewer (No Post Selected)")
-            self.context_text_area.insert(tk.END, "Please select a post to display its context chain.\n\n", "bold")
-            self.context_text_area.config(state=tk.DISABLED)
             return
 
         original_df_index = self.df_displayed.index[self.current_display_idx]
         current_post = self.df_all_posts.loc[original_df_index]
         current_post_num = current_post.get('Post Number')
 
-        if not pd.notna(current_post_num):
-            self.context_chain_win.title("Context Chain Viewer (Invalid Post Number)")
-            self.context_text_area.insert(tk.END, "Selected post has no valid Post Number for context tracing.\n\n", "bold")
-            self.context_text_area.config(state=tk.DISABLED)
-            return
+        if not pd.notna(current_post_num): return
 
-        # --- History Management Logic ---
+        # History Management for the "Back" button
         if hasattr(self, '_is_navigating_context_back') and self._is_navigating_context_back:
-            self._is_navigating_context_back = False # Reset flag after back navigation
+            self._is_navigating_context_back = False
         else:
             if not self.context_history or self.context_history[-1] != current_post_num:
                 self.context_history.append(current_post_num)
         
         if hasattr(self, 'context_back_button') and self.context_back_button.winfo_exists():
             self.context_back_button.config(state=tk.NORMAL if len(self.context_history) > 1 else tk.DISABLED)
-        # --- End History Management ---
 
         self.context_chain_win.title(f"Context Chain for Post #{int(current_post_num)}")
         self.context_text_area.insert(tk.END, f"Context for Post #{int(current_post_num)}\n\n", "bold")
 
+        # --- Display all sections ---
         quoted_by_this_post = app_data.post_quotes_map.get(current_post_num, [])
         display_section("Posts Quoted by This Post", quoted_by_this_post)
 
         posts_quoting_this = app_data.post_quoted_by_map.get(current_post_num, [])
         display_section("Posts Quoting This Post", posts_quoting_this)
         
+        # Time/Delta Matches
         current_date = current_post.get('Datetime_UTC')
+        filtered_delta_matches = []
+        time_title = "Time/Delta Matches"
         if pd.notna(current_date):
             time_hhmm = current_date.strftime("%H:%M")
+            time_title = f"Time/Delta Matches ({time_hhmm})"
             delta_matches = app_data.post_time_hhmm_map.get(time_hhmm, [])
             filtered_delta_matches = sorted(list(set(delta_matches) - {current_post_num} - set(quoted_by_this_post) - set(posts_quoting_this)))
-            display_section(f"Delta Matches (Month/Day: {current_date.month}/{current_date.day})", filtered_delta_matches)
-        else:
-            self.context_text_area.insert(tk.END, "Delta Matches (No date for current post):\n  None\n\n", "bold")
+        display_section(time_title, filtered_delta_matches)
 
+        # Shared Themes
         current_themes = current_post.get('Themes', [])
+        filtered_theme_posts = []
         if current_themes and isinstance(current_themes, list):
             all_shared_theme_posts = [p for t in current_themes for p in app_data.theme_posts_map.get(t, [])]
-            filtered_shared_theme_posts = sorted(list(set(all_shared_theme_posts) - {current_post_num} - set(quoted_by_this_post) - set(posts_quoting_this)))
-            display_section("Shared Themes", filtered_shared_theme_posts)
-        else:
-            self.context_text_area.insert(tk.END, "Shared Themes (No themes for current post):\n  None\n\n", "bold")
+            filtered_theme_posts = sorted(list(set(all_shared_theme_posts) - {current_post_num} - set(quoted_by_this_post) - set(posts_quoting_this)))
+        display_section("Shared Themes", filtered_theme_posts)
 
-        text = current_post.get('Text', '')
-        if isinstance(text, str) and (current_markers := re.findall(r'\[([A-Z0-9\s/\\!@#$%^&*()_+\-=\[\]{};\':"|,.<>/?`~]+)\]', text)):
-            all_shared_marker_posts = [p for m in current_markers for p in app_data.post_markers_map.get(m.strip(), []) if m.strip()]
-            filtered_shared_marker_posts = sorted(list(set(all_shared_marker_posts) - {current_post_num} - set(quoted_by_this_post) - set(posts_quoting_this)))
-            display_section("Shared Markers", filtered_shared_marker_posts)
-        else:
-            self.context_text_area.insert(tk.END, "Shared Markers (No markers for current post):\n  None\n\n", "bold")
+        # Shared [Markers]
+        text_content = current_post.get('Text', '')
+        filtered_marker_posts = []
+        if isinstance(text_content, str) and (markers := re.findall(r'\[([^\]]+)\]', text_content)):
+            all_shared_marker_posts = [p for m in markers for p in app_data.post_markers_map.get(m.strip(), []) if m.strip()]
+            filtered_marker_posts = sorted(list(set(all_shared_marker_posts) - {current_post_num} - set(quoted_by_this_post) - set(posts_quoting_this)))
+        display_section("Shared [Markers]", filtered_marker_posts)
 
         self.context_text_area.config(state=tk.DISABLED)
 # --- END UPDATE_CONTEXT_CHAIN_CONTENT ---
