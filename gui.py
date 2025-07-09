@@ -2335,7 +2335,6 @@ class QPostViewer:
 
         if not pd.notna(current_post_num): return
 
-        # History Management for the "Back" button
         if hasattr(self, '_is_navigating_context_back') and self._is_navigating_context_back:
             self._is_navigating_context_back = False
         else:
@@ -2348,39 +2347,68 @@ class QPostViewer:
         self.context_chain_win.title(f"Context Chain for Post #{int(current_post_num)}")
         self.context_text_area.insert(tk.END, f"Context for Post #{int(current_post_num)}\n\n", "bold")
 
-        # --- Display all sections ---
+        # --- Standard Context Sections ---
         quoted_by_this_post = app_data.post_quotes_map.get(current_post_num, [])
         display_section("Posts Quoted by This Post", quoted_by_this_post)
-
         posts_quoting_this = app_data.post_quoted_by_map.get(current_post_num, [])
         display_section("Posts Quoting This Post", posts_quoting_this)
         
-        # Time/Delta Matches
         current_date = current_post.get('Datetime_UTC')
-        filtered_delta_matches = []
-        time_title = "Time/Delta Matches"
         if pd.notna(current_date):
             time_hhmm = current_date.strftime("%H:%M")
-            time_title = f"Time/Delta Matches ({time_hhmm})"
             delta_matches = app_data.post_time_hhmm_map.get(time_hhmm, [])
             filtered_delta_matches = sorted(list(set(delta_matches) - {current_post_num} - set(quoted_by_this_post) - set(posts_quoting_this)))
-        display_section(time_title, filtered_delta_matches)
+            display_section(f"Time/Delta Matches ({time_hhmm})", filtered_delta_matches)
 
-        # Shared Themes
         current_themes = current_post.get('Themes', [])
-        filtered_theme_posts = []
-        if current_themes and isinstance(current_themes, list):
+        if current_themes:
             all_shared_theme_posts = [p for t in current_themes for p in app_data.theme_posts_map.get(t, [])]
             filtered_theme_posts = sorted(list(set(all_shared_theme_posts) - {current_post_num} - set(quoted_by_this_post) - set(posts_quoting_this)))
-        display_section("Shared Themes", filtered_theme_posts)
+            display_section("Shared Themes", filtered_theme_posts)
 
-        # Shared [Markers]
         text_content = current_post.get('Text', '')
-        filtered_marker_posts = []
         if isinstance(text_content, str) and (markers := re.findall(r'\[([^\]]+)\]', text_content)):
             all_shared_marker_posts = [p for m in markers for p in app_data.post_markers_map.get(m.strip(), []) if m.strip()]
             filtered_marker_posts = sorted(list(set(all_shared_marker_posts) - {current_post_num} - set(quoted_by_this_post) - set(posts_quoting_this)))
-        display_section("Shared [Markers]", filtered_marker_posts)
+            display_section("Shared [Markers]", filtered_marker_posts)
+
+        # --- NEW: Mirrored Matches Section ---
+        self.context_text_area.insert(tk.END, "🔹 Mirrored Matches:\n", "bold")
+        found_any_mirror = False
+
+        # 1. Mirrored Date
+        if pd.notna(current_date):
+            mirrored_md, posts = self._get_mirrored_date_posts(current_date)
+            if mirrored_md and posts:
+                found_any_mirror = True
+                self.context_text_area.insert(tk.END, f"  → Mirrored Delta: {mirrored_md.replace('-', '/')} →")
+                for i, p_num in enumerate(posts):
+                    self.context_text_area.insert(tk.END, f" [>>{p_num}]", ("clickable_context_link", f"md_link_{p_num}"))
+                    self.context_text_area.tag_bind(f"md_link_{p_num}", "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+                self.context_text_area.insert(tk.END, "\n")
+
+        # 2. Mirrored Post Number
+        reversed_post_num = self._get_mirrored_post_number(current_post_num)
+        if reversed_post_num:
+            found_any_mirror = True
+            self.context_text_area.insert(tk.END, f"  → Reversed Post Number: [>>{reversed_post_num}]", ("clickable_context_link", f"rpn_link_{reversed_post_num}"))
+            self.context_text_area.tag_bind(f"rpn_link_{reversed_post_num}", "<Button-1>", lambda e, pn=reversed_post_num: self.jump_to_post_number_from_ref(pn))
+            self.context_text_area.insert(tk.END, "\n")
+
+        # 3. Mirrored Timestamp
+        if pd.notna(current_date):
+            mirrored_time_str, posts = self._get_mirrored_time_posts(current_date)
+            posts = sorted(list(set(posts) - {current_post_num})) # Filter self
+            if posts:
+                found_any_mirror = True
+                self.context_text_area.insert(tk.END, f"  → Time Mirror: {mirrored_time_str} →")
+                for i, p_num in enumerate(posts):
+                    self.context_text_area.insert(tk.END, f" [>>{p_num}]", ("clickable_context_link", f"mt_link_{p_num}"))
+                    self.context_text_area.tag_bind(f"mt_link_{p_num}", "<Button-1>", lambda e, pn=p_num: self.jump_to_post_number_from_ref(pn))
+                self.context_text_area.insert(tk.END, "\n")
+        
+        if not found_any_mirror:
+            self.context_text_area.insert(tk.END, "  None\n")
 
         self.context_text_area.config(state=tk.DISABLED)
 # --- END UPDATE_CONTEXT_CHAIN_CONTENT ---
@@ -2484,6 +2512,52 @@ class QPostViewer:
             self.jump_to_post_number_from_ref(target_post_num)
 
 # --- END CONTEXT BACK NAVIGATION ---
+
+# --- START MIRRORING LOGIC HELPERS ---
+
+    def _get_mirrored_date_posts(self, date_obj):
+        """Looks up posts from a mirrored calendar date."""
+        mirrored_date_pairs = {
+            "04-15": "10-17", "10-17": "04-15", "01-28": "07-31",
+            "07-31": "01-28", "03-11": "09-12", "09-12": "03-11",
+            "02-05": "08-08", "08-08": "02-05", "06-10": "12-11",
+            "12-11": "06-10"
+        }
+        month_day_str = date_obj.strftime("%m-%d")
+        mirrored_md = mirrored_date_pairs.get(month_day_str)
+        
+        if not mirrored_md:
+            return None, []
+            
+        # Find all posts matching the mirrored month and day
+        matching_posts_df = self.df_all_posts[
+            self.df_all_posts['Datetime_UTC'].dt.strftime('%m-%d') == mirrored_md
+        ]
+        return mirrored_md, list(matching_posts_df['Post Number'].dropna().astype(int))
+
+    def _get_mirrored_post_number(self, post_num):
+        """Returns the reversed post number if it exists in the data."""
+        if not post_num or not isinstance(post_num, (int, float)):
+            return None
+        reversed_num = int(str(int(post_num))[::-1])
+        
+        # Check if a post with this reversed number actually exists
+        if not self.df_all_posts[self.df_all_posts['Post Number'] == reversed_num].empty:
+            return reversed_num
+        return None
+
+    def _get_mirrored_time_posts(self, time_obj):
+        """Finds posts at the 'reversed' time (23:59:59 - current time)."""
+        mirrored_hr = 23 - time_obj.hour
+        mirrored_min = 59 - time_obj.minute
+        mirrored_sec = 59 - time_obj.second
+        
+        # Create a new time string to look up in the index
+        mirrored_time_str = f"{mirrored_hr:02}:{mirrored_min:02}:{mirrored_sec:02}"
+        matching_posts = app_data.post_time_hhmms_map.get(mirrored_time_str, [])
+        return mirrored_time_str, matching_posts
+
+# --- END MIRRORING LOGIC HELPERS ---
 
 # --- START SHOW_ABOUT_DIALOG ---
 
