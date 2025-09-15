@@ -75,6 +75,8 @@ It is a tool designed for independent verification and personal knowledge manage
 ## 🤝 Contribution & Support
 QView is a community-driven, open-source project. Your feedback and contributions are welcome.
 
+Join the conversation at XDA Forums https://xdaforums.com/t/tool-win-qview-offline-q-drop-explorer-delta-search-archive-tool-dark-to-light.4742777/
+
 View Source & Fork: https://github.com/sws06/QView
 
 Report Issues / Suggest Features: GitHub Issues
