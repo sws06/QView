@@ -220,8 +220,6 @@ class QPostViewer:
         self.clear_search_button.pack(side="left", padx=(5,2))
         self.post_number_label = ttk.Label(nav_frame, text="", width=35, anchor="center", font=('Arial', 11, 'bold'))
         self.post_number_label.pack(side="left", padx=5, expand=True, fill=tk.X)
-        self.highlight_abbreviations_checkbutton = ttk.Checkbutton(nav_frame, text="Highlight Abbreviations", variable=self.highlight_abbreviations_var, command=self.on_highlight_abbreviations_toggle)
-        self.highlight_abbreviations_checkbutton.pack(side="left", padx=5)
 
         actions_frame = ttk.Labelframe(controls_main_frame, text="Search & Actions", padding=(10,5))
         actions_frame.pack(pady=5, fill=tk.X, expand=True)
@@ -244,7 +242,6 @@ class QPostViewer:
         self.search_menu = tk.Menu(self.search_menu_button, tearoff=0)
         self.search_menu_button["menu"] = self.search_menu
         self.search_menu.add_command(label="Search by Date", command=self.show_calendar)
-        self.search_menu.add_command(label="Delta Search", command=self.show_day_delta_dialog)
         self.search_menu.add_command(label="Today's Deltas", command=self.search_today_deltas)
         self.search_menu.add_command(label="Search by Theme", command=self.show_theme_selection_dialog)
         Tooltip(self.search_menu_button, lambda: "Advanced search options.")
@@ -559,9 +556,7 @@ class QPostViewer:
         self._insert_text_with_abbreviations_and_urls(self.post_text_area, main_text_content_raw, (), f"main_{original_df_index}")
         if self.current_search_active:
             search_keyword = self.keyword_entry.get().strip().lower()
-            # Ensure the placeholder text is not treated as a search term
             if search_keyword and search_keyword != config.PLACEHOLDER_KEYWORD.lower():
-                # Iterate through the entire text area content to find matches
                 start_pos = "1.0"
                 while True:
                     start_pos = self.post_text_area.search(search_keyword, start_pos, stopindex=tk.END, nocase=True)
@@ -1070,64 +1065,94 @@ class QPostViewer:
 
 # --- START DATE_SEARCH_LOGIC ---
 
+# --- START show_calendar ---
     def show_calendar(self):
+        if hasattr(self, 'cal_win') and self.cal_win.winfo_exists():
+            self.cal_win.lift()
+            return
+        
         try:
             dialog_bg = self.style.lookup("TFrame", "background")
-        except tk.TclError: # Fallback if style lookup fails
+        except tk.TclError: 
             dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
 
-        top = tk.Toplevel(self.root)
-        top.title("Select Date")
-        top.configure(bg=dialog_bg)
-        top.transient(self.root)
-        top.grab_set()
+        self.cal_win = tk.Toplevel(self.root)
+        self.cal_win.title("Select Date")
+        self.cal_win.configure(bg=dialog_bg)
+        self.cal_win.geometry("300x300")
 
         now = datetime.datetime.now()
         cal_y, cal_m, cal_d = now.year, now.month, now.day
 
-        if self.df_displayed is not None and not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed): # Check df_displayed
+        if self.df_displayed is not None and not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed):
             cur_post_dt = self.df_displayed.iloc[self.current_display_idx].get('Datetime_UTC')
             if pd.notna(cur_post_dt):
                 cal_y, cal_m, cal_d = cur_post_dt.year, cur_post_dt.month, cur_post_dt.day
         
-# Define calendar colors based on theme
         cal_fg = "#000000" if self.current_theme == "light" else "#e0e0e0"
         cal_bg = "#ffffff" if self.current_theme == "light" else "#3c3f41"
-        cal_sel_bg = "#0078D7"  # Selection background can be consistent
-        cal_sel_fg = "#ffffff"  # Selection foreground
-        cal_hdr_bg = "#e1e1e1" if self.current_theme == "light" else "#4a4a4a" # Header/border
-        cal_dis_bg = "#f0f0f0" if self.current_theme == "light" else "#2b2b2b" # Disabled days background
-        cal_dis_fg = "grey" # Disabled days foreground
+        cal_sel_bg = "#0078D7"
+        cal_sel_fg = "#ffffff"
+        cal_hdr_bg = "#e1e1e1" if self.current_theme == "light" else "#4a4a4a"
+        cal_dis_bg = "#f0f0f0" if self.current_theme == "light" else "#2b2b2b"
+        cal_dis_fg = "grey"
 
-        cal = Calendar(top, selectmode="day", year=cal_y, month=cal_m, day=cal_d,
+        self.cal = Calendar(self.cal_win, selectmode="day", year=cal_y, month=cal_m, day=cal_d,
                        date_pattern='m/d/yy', font="Arial 9",
-                       background=cal_hdr_bg, foreground=cal_fg, 
-                       headersbackground=cal_hdr_bg, headersforeground=cal_fg, 
-                       normalbackground=cal_bg, weekendbackground=cal_bg, 
-                       normalforeground=cal_fg, weekendforeground=cal_fg, 
-                       othermonthbackground=cal_dis_bg, othermonthwebackground=cal_dis_bg, 
+                       background=cal_hdr_bg, foreground=cal_fg,
+                       headersbackground=cal_hdr_bg, headersforeground=cal_fg,
+                       normalbackground=cal_bg, weekendbackground=cal_bg,
+                       normalforeground=cal_fg, weekendforeground=cal_fg,
+                       othermonthbackground=cal_dis_bg, othermonthwebackground=cal_dis_bg,
                        othermonthforeground=cal_dis_fg, othermonthweforeground=cal_dis_fg,
-                       selectbackground=cal_sel_bg, selectforeground=cal_sel_fg, 
+                       selectbackground=cal_sel_bg, selectforeground=cal_sel_fg,
                        bordercolor=cal_hdr_bg)
-        cal.pack(padx=10, pady=10)
+        self.cal.pack(padx=10, pady=(5,0))
 
-        def on_date_selected_from_calendar():
-            selected_date_str = cal.get_date()
-            top.destroy() # Close the calendar window
-            self._search_by_date_str(selected_date_str) # Process the selected date
+        self.all_years_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(self.cal_win, text="Search All Years (Delta)", variable=self.all_years_var).pack(pady=(5, 0))
+        
+        def on_date_select(event):
+            selected_date_str = self.cal.get_date()
+            all_years = self.all_years_var.get()
+            self._search_by_date_str(selected_date_str, all_years=all_years)
 
-        ttk.Button(top, text="Select Date", command=on_date_selected_from_calendar).pack(pady=5)
+        self.cal.bind("<<CalendarSelected>>", on_date_select)
 
-    def _search_by_date_str(self, date_str_from_cal):
+        # Navigation buttons for day-by-day
+        nav_frame = ttk.Frame(self.cal_win)
+        nav_frame.pack(pady=5, fill=tk.X)
+        ttk.Button(nav_frame, text="<< Prev Day", command=self.cal.prev_day).pack(side=tk.LEFT, expand=True)
+        ttk.Button(nav_frame, text="Next Day >>", command=self.cal.next_day).pack(side=tk.RIGHT, expand=True)
+
+        ttk.Button(self.cal_win, text="Go", command=on_date_select).pack(pady=(0, 10))
+        
+        # We need to re-bind the <<CalendarSelected>> event to the new on_date_select method
+        self.cal.bind("<<CalendarSelected>>", on_date_select)
+# --- END show_calendar ---
+
+# --- START _search_by_date_str ---
+    def _search_by_date_str(self, date_str_from_cal, all_years=False):
         try:
             target_date = pd.to_datetime(date_str_from_cal, format='%m/%d/%y').date()
-            if self.df_all_posts is None: # Ensure df_all_posts is loaded
+            if self.df_all_posts is None:
                 messagebox.showerror("Error", "Post data not loaded.", parent=self.root)
                 return
-            results = self.df_all_posts[self.df_all_posts['Datetime_UTC'].dt.date == target_date]
-            self._handle_search_results(results, f"Date = {target_date.strftime('%Y-%m-%d')}")
+
+            if all_years:
+                results = self.df_all_posts[
+                    (self.df_all_posts['Datetime_UTC'].dt.month == target_date.month) &
+                    (self.df_all_posts['Datetime_UTC'].dt.day == target_date.day)
+                ]
+                search_term = f"Posts from {target_date.strftime('%B %d')} (All Years)"
+            else:
+                results = self.df_all_posts[self.df_all_posts['Datetime_UTC'].dt.date == target_date]
+                search_term = f"Date = {target_date.strftime('%Y-%m-%d')}"
+
+            self._handle_search_results(results, search_term)
         except Exception as e:
             messagebox.showerror("Error", f"Date selection error: {e}", parent=self.root)
+# --- END _search_by_date_str ---
 
 # --- END DATE_SEARCH_LOGIC ---
 
@@ -1962,6 +1987,13 @@ class QPostViewer:
         rb_default.pack(anchor="w", padx=5)
         rb_chrome_incognito = ttk.Radiobutton(link_pref_frame, text="Google Chrome (Incognito, if available)", variable=self.settings_link_pref_var, value="chrome_incognito", command=self.on_setting_change)
         rb_chrome_incognito.pack(anchor="w", padx=5)
+        
+        # --- Highlight Abbreviations Checkbox ---
+        abbreviations_frame = ttk.Labelframe(main_frame, text="Content Highlighting", padding="10")
+        abbreviations_frame.pack(fill="x", pady=5)
+        self.settings_highlight_abbreviations_var = tk.BooleanVar(value=self.app_settings.get("highlight_abbreviations", settings.DEFAULT_SETTINGS.get("highlight_abbreviations")))
+
+        ttk.Checkbutton(abbreviations_frame, text="Highlight Abbreviations in Post Text", variable=self.settings_highlight_abbreviations_var, command=self.on_setting_change).pack(anchor="w", padx=5)
 
 
 # --- Close Button ---
@@ -1975,6 +2007,13 @@ class QPostViewer:
         new_theme = self.settings_theme_var.get()
         if self.current_theme != new_theme:
             self._set_theme(new_theme) # Call the central handler which also saves
+            
+            # Highlight Abbreviations
+        new_highlight_abbreviations = self.settings_highlight_abbreviations_var.get()
+        if self.app_settings.get("highlight_abbreviations") != new_highlight_abbreviations:
+            self.app_settings["highlight_abbreviations"] = new_highlight_abbreviations
+            settings.save_settings(self.app_settings)
+            print(f"Highlight abbreviations saved: '{new_highlight_abbreviations}'")
 
 # Link Opening Preference
         new_link_pref = self.settings_link_pref_var.get()
@@ -3014,17 +3053,6 @@ class QPostViewer:
         else: 
             self.show_welcome_message()
 
-# --- NEW: Handler for abbreviation highlight toggle ---
-    def on_highlight_abbreviations_toggle(self):
-        new_state = self.highlight_abbreviations_var.get()
-        self.app_settings["highlight_abbreviations"] = new_state
-        settings.save_settings(self.app_settings)
-        print(f"Abbreviation highlighting set to: {new_state}")
-# Re-render the current post to apply/remove highlighting
-        if self.current_display_idx != -1 and self.df_displayed is not None and not self.df_displayed.empty:
-            self.update_display()
-        else:
-            self.show_welcome_message() # Even for welcome, ensure tags are reset
 
 # === END::THEME_TOGGLE ===
 
@@ -3059,12 +3087,8 @@ class QPostViewer:
         self.post_text_area.tag_configure("welcome_heading_tag", font=("Arial", 12, "bold"), spacing1=10, spacing3=5)
         self.post_text_area.tag_configure("welcome_body_tag", font=("Arial", 10), spacing1=5)
         self.post_text_area.tag_configure("welcome_hint_tag", font=("Arial", 9, "italic"), justify=tk.RIGHT, foreground="grey")
+        self.post_text_area.tag_configure("search_highlight_tag", background="yellow", foreground="black")
 
 # --- END CONFIGURE_TEXT_TAGS ---
-
-
-
-
-
 
 # --- END QPOSTVIEWER_CLASS_DEFINITION ---
