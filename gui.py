@@ -12,6 +12,7 @@ import urllib.parse
 import threading
 import re # For parsing post numbers from references
 import config
+import math
 import utils
 import data as app_data
 import settings
@@ -19,7 +20,6 @@ import settings
 # --- END GUI_PY_HEADER ---
 
 # --- START TOOLTIP_CLASS ---
-
 class Tooltip:
     def __init__(self, widget, text_generator, delay=700, follow=True, bind_widget_events=True):
         self.widget = widget
@@ -81,11 +81,552 @@ class Tooltip:
         self.tip_window = None
         if tw:
             tw.destroy()
+# --- END TOOLTIP_CLASS ---
+         
+# --- START QCLOCK_CLASS ---
+class QClock:
+# START __INIT__
+    def __init__(self, parent_frame, root, gui_instance, style, data):
+        self.parent_frame = parent_frame
+        self.root = root
+        self.gui_instance = gui_instance
+        self.style = style
+        self.post_data = data
 
-         # --- END TOOLTIP_CLASS ---
+        # --- State Management ---
+        self.tooltip_window = None
+        self.dot_id_to_post_info = {}
+        self.post_num_to_dot_id = {}
+        self.highlighted_dots = set()
+        self.delta_source_post_num = None
+        self.drawn_lines = []
+        self.multi_selection = set()
+        self.zoom_level = 1.0
+        self.zoom_factor = 1.1
+        self.pan_start_x = 0
+        self.pan_start_y = 0
+        self.highlighted_date_id = None
+        self.hover_highlighted_dots = set()
+        
+        # --- NEW: Zoom Level of Detail (LOD) Thresholds ---
+        self.zoom_threshold_days = 2.0  # Show day lines at 200% zoom
+        self.zoom_threshold_hours = 10.0 # Show hour lines at 1000% zoom
 
-         # --- START QPOSTVIEWER_CLASS_DEFINITION ---
+        # --- Main UI Frame ---
+        self.clock_frame = ttk.Frame(self.parent_frame)
+        self.clock_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # --- Top Controls Frame ---
+        controls_frame = ttk.Frame(self.clock_frame)
+        controls_frame.pack(fill=tk.X, pady=(10, 0), padx=20)
+        
+        self.show_deltas_var = tk.BooleanVar(value=True)
+        delta_toggle = ttk.Checkbutton(controls_frame, text="Show Deltas", variable=self.show_deltas_var)
+        delta_toggle.pack(side=tk.LEFT)
+        Tooltip(delta_toggle, lambda: "Toggle highlighting of posts with the same HH:MM timestamp.")
 
+        # Date Ring Toggle (This will now be handled by the zoom)
+        # We can remove the old Ring Display toggle as it's now automatic
+        
+        layout_button = ttk.Button(controls_frame, text="Toggle Layout", 
+                                   command=lambda: self.gui_instance.toggle_clock_layout())
+        layout_button.pack(side=tk.LEFT, padx=10)
+        Tooltip(layout_button, lambda: "Switch between horizontal and vertical layouts.")
+
+        # Visual Legend
+        legend_frame = ttk.Frame(controls_frame)
+        legend_frame.pack(side=tk.RIGHT, padx=10)
+        
+        def create_legend_item(parent, color, text):
+            box = tk.Frame(parent, bg=color, width=10, height=10, relief=tk.SOLID, borderwidth=1)
+            box.pack(side=tk.LEFT, padx=(5, 2))
+            label = ttk.Label(parent, text=text, font=("Arial", 8))
+            label.pack(side=tk.LEFT)
+
+        create_legend_item(legend_frame, "red", "Time Delta")
+        create_legend_item(legend_frame, "cyan", "Time Mirror")
+        create_legend_item(legend_frame, "yellow", "Post # Mirror")
+        create_legend_item(legend_frame, "green", "Date Mirror")
+
+        # --- Canvas for the Clock ---
+        self.canvas = tk.Canvas(self.clock_frame, bg="white", highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        # --- Bottom Status Bar ---
+        status_frame = ttk.Frame(self.clock_frame, padding=(10, 5))
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        self.status_label = ttk.Label(status_frame, text="Click a dot to see connections.")
+        self.status_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        
+        self.view_in_list_button = ttk.Button(status_frame, text="View in List", state=tk.DISABLED)
+        self.view_in_list_button.pack(side=tk.RIGHT)
+
+        self.zoom_label = ttk.Label(status_frame, text="Zoom: 100%")
+        self.zoom_label.pack(side=tk.RIGHT, padx=10)
+        
+        # --- Event Bindings ---
+        self.canvas.bind("<Configure>", self.on_resize)
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel_zoom)
+        self.canvas.bind("<Button-4>", self._on_mousewheel_zoom)
+        self.canvas.bind("<Button-5>", self._on_mousewheel_zoom)
+        self.canvas.bind("<ButtonPress-2>", self._on_pan_start)
+        self.canvas.bind("<B2-Motion>", self._on_pan_move)
+        # Note: We remove the old date label bindings as they are now part of the dynamic grid
+# END __INIT__
+
+    def _update_grid_visibility(self):
+        """Shows or hides grid layers based on the current zoom level."""
+        # Day Grid Visibility
+        if self.zoom_level >= self.zoom_threshold_days:
+            self.canvas.itemconfig("day_grid", state='normal')
+        else:
+            self.canvas.itemconfig("day_grid", state='hidden')
+        
+        # Hour Grid Visibility
+        if self.zoom_level >= self.zoom_threshold_hours:
+            self.canvas.itemconfig("hour_grid", state='normal')
+        else:
+            self.canvas.itemconfig("hour_grid", state='hidden')
+
+    def _draw_month_grid(self):
+        """Draws the 12 month labels and lines."""
+        months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+        for i, month in enumerate(months):
+            angle = math.radians(i * 30 - 90)
+            x1 = self.center_x + (self.radius - 15) * math.cos(angle)
+            y1 = self.center_y + (self.radius - 15) * math.sin(angle)
+            x2 = self.center_x + self.radius * math.cos(angle)
+            y2 = self.center_y + self.radius * math.sin(angle)
+            self.canvas.create_line(x1, y1, x2, y2, fill="lightgrey", tags=("grid", "month_grid"))
+            
+            text_x = self.center_x + (self.radius + 15) * math.cos(math.radians(i * 30 - 75))
+            text_y = self.center_y + (self.radius + 15) * math.sin(math.radians(i * 30 - 75))
+            self.canvas.create_text(text_x, text_y, text=month, font=("Arial", 9, "bold"), fill="darkgrey", tags=("grid", "month_grid"))
+
+    def _draw_day_grid(self):
+        """Draws the 365 day lines and labels (initially hidden)."""
+        for day_of_year in range(1, 366, 5): # Draw fewer labels to reduce initial clutter
+            angle = math.radians((day_of_year / 365.0) * 360 - 90)
+            x1 = self.center_x + self.radius * math.cos(angle)
+            y1 = self.center_y + self.radius * math.sin(angle)
+            x2 = self.center_x + (self.radius + 5) * math.cos(angle)
+            y2 = self.center_y + (self.radius + 5) * math.sin(angle)
+            self.canvas.create_line(x1, y1, x2, y2, fill="lightgrey", tags=("grid", "day_grid"), state='hidden')
+
+            text_x = self.center_x + (self.radius + 15) * math.cos(angle)
+            text_y = self.center_y + (self.radius + 15) * math.sin(angle)
+            date = datetime.datetime(2023, 1, 1) + datetime.timedelta(days=day_of_year - 1)
+            date_str = date.strftime("%m/%d")
+            self.canvas.create_text(text_x, text_y, text=date_str, font=("Arial", 7), fill="grey", tags=("grid", "day_grid"), state='hidden')
+
+    def _draw_hour_grid(self):
+        """Draws the 24 hour lines and labels (initially hidden)."""
+        for hour in range(24):
+            angle = math.radians((hour / 24.0) * 360 - 90)
+            x1 = self.center_x + (self.radius - 10) * math.cos(angle)
+            y1 = self.center_y + (self.radius - 10) * math.sin(angle)
+            x2 = self.center_x + (self.radius + 10) * math.cos(angle)
+            y2 = self.center_y + (self.radius + 10) * math.sin(angle)
+            self.canvas.create_line(x1, y1, x2, y2, fill="#f0f0f0", width=1, tags=("grid", "hour_grid"), state='hidden')
+            
+            text_x = self.center_x + (self.radius - 25) * math.cos(angle)
+            text_y = self.center_y + (self.radius - 25) * math.sin(angle)
+            self.canvas.create_text(text_x, text_y, text=f"{hour:02d}", font=("Arial", 8, "bold"), fill="black", tags=("grid", "hour_grid"), state='hidden')
+    def highlight_date_on_ring(self, date_str):
+        """Finds a date label on this clock's canvas and highlights it."""
+        self.clear_date_highlight() # Clear previous before highlighting new
+        text_id = self.canvas.find_withtag(f"date_{date_str}")
+        if text_id:
+            self.highlighted_date_id = text_id[0]
+            self.canvas.itemconfig(self.highlighted_date_id, fill="red")
+
+    def clear_date_highlight(self):
+        """Resets the highlighted date label back to its default color."""
+        if self.highlighted_date_id:
+            try:
+                self.canvas.itemconfig(self.highlighted_date_id, fill="grey")
+            except tk.TclError:
+                pass # Item may have been deleted on redraw
+            self.highlighted_date_id = None
+
+    def _on_date_label_enter(self, event):
+        """When hovering over a date, highlight the posts from that date."""
+        item = self.canvas.find_closest(event.x, event.y)[0]
+        tags = self.canvas.gettags(item)
+        date_str = None
+        for tag in tags:
+            if tag.startswith("date_"):
+                date_str = tag.split("_")[1]
+                break
+        if not date_str: return
+
+        try:
+            month, day = map(int, date_str.split('/'))
+            posts_on_date = self.post_data[
+                (self.post_data['Datetime_UTC'].dt.month == month) &
+                (self.post_data['Datetime_UTC'].dt.day == day)
+            ]
+            if not posts_on_date.empty:
+                for post_num in posts_on_date['Post Number']:
+                    dot_id = self.post_num_to_dot_id.get(post_num)
+                    if dot_id:
+                        self.canvas.itemconfig(dot_id, fill="orange", outline="orange")
+                        self.hover_highlighted_dots.add(dot_id)
+        except (ValueError, IndexError):
+            pass
+
+    def _on_date_label_leave(self, event):
+        """Resets the hover-highlighted dots to their original colors."""
+        for dot_id in self.hover_highlighted_dots:
+            post_info = self.dot_id_to_post_info.get(dot_id, {})
+            post_num = post_info.get('pn')
+            
+            try:
+                if post_num in self.multi_selection:
+                    self.canvas.itemconfig(dot_id, fill="purple", outline="purple")
+                elif dot_id in self.highlighted_dots:
+                    self.canvas.itemconfig(dot_id, fill="red", outline="red")
+                else:
+                    self.canvas.itemconfig(dot_id, fill="blue", outline="blue")
+            except tk.TclError:
+                pass # Item may have been deleted
+
+        self.hover_highlighted_dots.clear()
+
+    def _reset_multi_selection(self):
+        """Resets any multi-selected dots back to their default color."""
+        if not self.multi_selection:
+            return
+        for post_num in self.multi_selection:
+            dot_id = self.post_num_to_dot_id.get(post_num)
+            if dot_id and self.canvas.winfo_exists():
+                self.canvas.itemconfig(dot_id, fill="blue", outline="blue")
+        self.multi_selection.clear()
+
+    def _on_date_label_click(self, event):
+        """Finds the clicked date, tells the coordinator to broadcast the highlight, and shows posts."""
+        item = self.canvas.find_closest(event.x, event.y)[0]
+        tags = self.canvas.gettags(item)
+        date_str = None
+        for tag in tags:
+            if tag.startswith("date_"):
+                date_str = tag.split("_")[1]
+                break
+        if not date_str: return
+            
+        # Tell the coordinator to highlight this date across all clocks
+        self.gui_instance.broadcast_date_highlight(date_str)
+            
+        try:
+            month, day = map(int, date_str.split('/'))
+            # Note: We now search the FULL dataset from the gui_instance, not the year-specific one
+            results = self.gui_instance.df_all_posts[
+                (self.gui_instance.df_all_posts['Datetime_UTC'].dt.month == month) &
+                (self.gui_instance.df_all_posts['Datetime_UTC'].dt.day == day)
+            ]
+            if not results.empty:
+                self.gui_instance._handle_search_results(results, f"Posts from {date_str} (All Years)")
+                self.gui_instance.toggle_clock_view()
+            else:
+                messagebox.showinfo("Q Clock", f"No posts found for {date_str}.", parent=self.root)
+        except (ValueError, IndexError):
+            print(f"Could not parse date from tag: {tags}")
+
+    def on_resize(self, event):
+        """Handles window resizing. Redraws everything."""
+        # On resize, we must delete everything and start fresh
+        self.canvas.delete("all")
+        
+        self.draw_clock() # Draw the main face first
+        
+        # Draw all grid levels (detailed ones will be hidden by default)
+        self._draw_month_grid()
+        self._draw_day_grid()
+        self._draw_hour_grid()
+        
+        # Plot the posts on top of the background
+        self.plot_posts()
+        
+        # Apply the initial visibility based on zoom
+        self._update_grid_visibility()
+
+    def _reset_highlights(self):
+        """Resets any highlighted dots back to their default color."""
+        if self.drawn_lines:
+            for line_id in self.drawn_lines:
+                self.canvas.delete(line_id)
+            self.drawn_lines = []
+            
+        if not self.highlighted_dots:
+            return
+        for dot_id in self.highlighted_dots:
+            if self.canvas.winfo_exists():
+                self.canvas.itemconfig(dot_id, fill="blue", outline="blue")
+        self.highlighted_dots.clear()
+        self.delta_source_post_num = None
+        
+    def draw_clock(self):
+        """Draws the static elements of the clock, like the main outer circle."""
+        self.canvas.delete("clock_face") # Use a new tag for the static parts
+        width = self.canvas.winfo_width()
+        height = self.canvas.winfo_height()
+        self.center_x, self.center_y = width / 2, height / 2
+        self.radius = min(width, height) / 2 - 40
+
+        # Draw the main clock circle
+        self.canvas.create_oval(self.center_x - self.radius, self.center_y - self.radius,
+                                self.center_x + self.radius, self.center_y + self.radius,
+                                outline="black", width=1.5, tags="clock_face")
+
+    def on_segment_click(self, hour_12):
+        """Filters posts for a given 12-hour segment and displays them."""
+        hour_24_a = hour_12 if hour_12 != 0 else 12 # 12 AM is hour 0, 12 PM is hour 12
+        hour_24_b = hour_12 + 12 if hour_12 != 0 else 0
+
+        if hour_12 == 0: # Handle midnight segment (12 AM)
+            hour_24_a, hour_24_b = 0, 12
+        
+        results = self.post_data[
+            (self.post_data['Datetime_UTC'].dt.hour == hour_24_a) |
+            (self.post_data['Datetime_UTC'].dt.hour == hour_24_b)
+        ]
+
+        if not results.empty:
+            self.gui_instance._handle_search_results(results, f"Posts from hour {hour_12}")
+            self.gui_instance.toggle_clock_view()
+        else:
+            messagebox.showinfo("Q Clock", f"No posts found for hour {hour_12}.", parent=self.root)
+
+    def on_dot_click(self, event, post_number):
+        """
+        Handles clicking on a post dot.
+        - With CTRL key: Adds/removes posts from a multi-selection set.
+        - Without CTRL key: Performs the standard delta/mirror analysis.
+        """
+        # Check if the Control key is held down (state mask 0x0004)
+        is_ctrl_click = (event.state & 0x0004) != 0
+
+        if is_ctrl_click:
+            # --- MULTI-SELECT LOGIC ---
+            self._reset_highlights() # Clear any previous single-click analysis
+            dot_id = self.post_num_to_dot_id.get(post_number)
+            if not dot_id: return
+
+            if post_number in self.multi_selection:
+                # Toggle OFF: Remove from selection and reset color
+                self.multi_selection.remove(post_number)
+                self.canvas.itemconfig(dot_id, fill="blue", outline="blue")
+            else:
+                # Toggle ON: Add to selection and color it purple
+                self.multi_selection.add(post_number)
+                self.canvas.itemconfig(dot_id, fill="purple", outline="purple")
+
+            if not self.multi_selection:
+                # If selection is now empty
+                self.status_label.config(text="Click a dot to see connections.")
+                self.view_in_list_button.config(state=tk.DISABLED)
+            else:
+                # Update status bar for multi-select
+                plural = "s" if len(self.multi_selection) > 1 else ""
+                self.status_label.config(text=f"{len(self.multi_selection)} post{plural} selected.")
+                
+                def view_multi_select_action():
+                    results_df = self.post_data[self.post_data['Post Number'].isin(self.multi_selection)]
+                    self.gui_instance._handle_search_results(results_df, "Multi-Select")
+                    self.gui_instance.toggle_clock_view()
+
+                self.view_in_list_button.config(state=tk.NORMAL, command=view_multi_select_action)
+
+        else:
+            # --- SINGLE-SELECT LOGIC (the original behavior) ---
+            self._reset_multi_selection() # Clear any previous multi-selection
+            self._reset_highlights()
+            
+            clicked_dot_id = self.post_num_to_dot_id.get(post_number)
+            if not clicked_dot_id: return
+            
+            x1, y1, _, _ = self.canvas.coords(clicked_dot_id)
+            center_x1, center_y1 = x1 + 3, y1 + 3
+
+            clicked_post_series = self.post_data[self.post_data['Post Number'] == post_number]
+            if clicked_post_series.empty: return
+                
+            posts_to_show_df = clicked_post_series
+            search_term = f"Post #{post_number}"
+
+            if self.show_deltas_var.get():
+                timestamp = clicked_post_series.iloc[0].get('Datetime_UTC')
+                if pd.notna(timestamp):
+                    time_key = timestamp.strftime('%H:%M')
+                    delta_post_numbers = app_data.post_time_hhmm_map.get(time_key, [])
+                    if delta_post_numbers:
+                        self.delta_source_post_num = post_number
+                        for pn in delta_post_numbers:
+                            dot_id = self.post_num_to_dot_id.get(pn)
+                            if dot_id:
+                                self.canvas.itemconfig(dot_id, fill="red", outline="red")
+                                self.highlighted_dots.add(dot_id)
+                        posts_to_show_df = self.post_data[self.post_data['Post Number'].isin(delta_post_numbers)]
+                        search_term = f"Delta Matches for Q#{post_number} at {time_key}"
+
+            # Drawing logic for all mirror types
+            timestamp = clicked_post_series.iloc[0].get('Datetime_UTC')
+            if pd.notna(timestamp):
+                _, mirrored_time_posts = self.gui_instance._get_mirrored_time_posts(timestamp)
+                for mt_post_num in mirrored_time_posts:
+                    if mt_post_num != post_number:
+                        mt_dot_id = self.post_num_to_dot_id.get(mt_post_num)
+                        if mt_dot_id:
+                            x2, y2, _, _ = self.canvas.coords(mt_dot_id)
+                            line = self.canvas.create_line(center_x1, center_y1, x2 + 3, y2 + 3, fill="cyan", width=1.5, tags="conn_line")
+                            self.drawn_lines.append(line)
+
+            mirrored_post_num = self.gui_instance._get_mirrored_post_number(post_number)
+            if mirrored_post_num:
+                mpn_dot_id = self.post_num_to_dot_id.get(mirrored_post_num)
+                if mpn_dot_id:
+                    x2, y2, _, _ = self.canvas.coords(mpn_dot_id)
+                    line = self.canvas.create_line(center_x1, center_y1, x2 + 3, y2 + 3, fill="yellow", width=1.5, dash=(4, 2), tags="conn_line")
+                    self.drawn_lines.append(line)
+            
+            post_date = clicked_post_series.iloc[0].get('Datetime_UTC')
+            if pd.notna(post_date):
+                _, mirrored_date_posts = self.gui_instance._get_mirrored_date_posts(post_date)
+                if mirrored_date_posts:
+                    target_post_num = mirrored_date_posts[0]
+                    md_dot_id = self.post_num_to_dot_id.get(target_post_num)
+                    if md_dot_id:
+                        x2, y2, _, _ = self.canvas.coords(md_dot_id)
+                        line = self.canvas.create_line(center_x1, center_y1, x2 + 3, y2 + 3, fill="green", width=1.5, arrow=tk.LAST, tags="conn_line")
+                        self.drawn_lines.append(line)
+
+            num_deltas = len(self.highlighted_dots) - 1 if self.highlighted_dots else 0
+            status_text = f"Selected: Q#{post_number} | Deltas: {num_deltas} | Mirrors: {len(self.drawn_lines)}"
+            self.status_label.config(text=status_text)
+            
+            def view_single_select_action():
+                self.gui_instance._handle_search_results(posts_to_show_df, search_term)
+                self.gui_instance.toggle_clock_view()
+
+            self.view_in_list_button.config(state=tk.NORMAL, command=view_single_select_action)
+
+    def plot_posts(self):
+        self.dot_id_to_post_info.clear()
+        self.post_num_to_dot_id.clear()
+        self._reset_highlights()
+        self._reset_multi_selection()
+        
+        if self.post_data is None or self.post_data.empty:
+            return
+
+        min_post = self.post_data['Post Number'].min()
+        max_post = self.post_data['Post Number'].max()
+        post_range = max_post - min_post if max_post > min_post else 1
+
+        for _, row in self.post_data.iterrows():
+            timestamp = row.get('Datetime_UTC')
+            post_number = row.get('Post Number')
+
+            if pd.notna(timestamp) and pd.notna(post_number):
+                hour = timestamp.hour
+                minute = timestamp.minute
+                clock_hour = hour % 12
+                angle = math.radians((clock_hour * 30 + minute / 2) - 90)
+                
+                normalized_post = (post_number - min_post) / post_range
+                min_dot_dist = 20 
+                max_dot_dist = self.radius - 20
+                dot_dist = min_dot_dist + (normalized_post * (max_dot_dist - min_dot_dist))
+
+                dot_radius = 3
+                dot_x = self.center_x + dot_dist * math.cos(angle)
+                dot_y = self.center_y + dot_dist * math.sin(angle)
+
+                dot = self.canvas.create_oval(dot_x - dot_radius, dot_y - dot_radius,
+                                              dot_x + dot_radius, dot_y + dot_radius,
+                                              fill="blue", outline="blue", tags="post_dot")
+                
+                post_info = {
+                    'pn': post_number, 
+                    'ts': timestamp.strftime("%H:%M:%S"),
+                    'date': timestamp.strftime("%Y-%m-%d")
+                }
+                self.dot_id_to_post_info[dot] = post_info
+                self.post_num_to_dot_id[post_number] = dot
+                
+                self.canvas.tag_bind(dot, "<Enter>", lambda event, d_id=dot: self.show_tooltip(event, d_id))
+                self.canvas.tag_bind(dot, "<Leave>", self.hide_tooltip)
+                self.canvas.tag_bind(dot, "<Button-1>", lambda event, pn=post_number: self.on_dot_click(event, pn))
+    
+    def show_tooltip(self, event, dot_id):
+        if self.tooltip_window:
+            self.hide_tooltip()
+
+        post_info = self.dot_id_to_post_info.get(dot_id)
+        if not post_info:
+            return
+            
+        tooltip_text = f"Q #{post_info['pn']} — {post_info['date']} {post_info['ts']}"
+        
+        if self.show_deltas_var.get() and dot_id in self.highlighted_dots and self.delta_source_post_num:
+             tooltip_text += f"\nΔ Match with Q #{self.delta_source_post_num}"
+
+        x, y = event.x_root + 15, event.y_root + 10
+        
+        self.tooltip_window = tw = tk.Toplevel(self.canvas)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(tw, text=tooltip_text, justify=tk.LEFT,
+                         background="#FFFFE0", relief=tk.SOLID, borderwidth=1,
+                         font=("tahoma", "9", "normal"))
+        label.pack(ipadx=1)
+
+    def hide_tooltip(self, event=None):
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+            
+    def _on_mousewheel_zoom(self, event):
+        """Zooms the canvas and updates grid visibility."""
+        scale = 0.0
+        if event.num == 4 or event.delta > 0:
+            scale = self.zoom_factor
+        elif event.num == 5 or event.delta < 0:
+            scale = 1 / self.zoom_factor
+        if scale == 0.0: return
+
+        x = self.canvas.canvasx(event.x)
+        y = self.canvas.canvasy(event.y)
+        
+        # Scale everything on the canvas smoothly
+        self.canvas.scale("all", x, y, scale, scale)
+        
+        self.zoom_level *= scale
+        self.zoom_label.config(text=f"Zoom: {self.zoom_level:.0%}")
+        
+        # Update which grid layers are visible
+        self._update_grid_visibility()
+        
+        return "break"
+
+    def _on_pan_start(self, event):
+        """Records the starting position for a pan action."""
+        self.pan_start_x = event.x
+        self.pan_start_y = event.y
+
+    def _on_pan_move(self, event):
+        """Moves the canvas content."""
+        dx = event.x - self.pan_start_x
+        dy = event.y - self.pan_start_y
+        self.canvas.move("all", dx, dy)
+        self.pan_start_x = event.x
+        self.pan_start_y = event.y
+        # No redraw is needed, as everything moves together       
+# --- END QCLOCK_CLASS ---
+
+# --- START QPOSTVIEWER_CLASS_DEFINITION ---         
 class QPostViewer:
 
 # --- START __INIT__ ---
@@ -105,6 +646,10 @@ class QPostViewer:
         self.root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
         self.root.minsize(800, 600)
 
+        # Main window layout configuration
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+
         self.welcome_logo_photo = None
         try:
             logo_path = os.path.join(os.getcwd(), "welcome_logo.png")
@@ -119,7 +664,6 @@ class QPostViewer:
         self._quote_image_references = []
         self.current_post_urls = []
         self.current_post_downloaded_article_path = None
-        
         self._context_expand_vars = {}
         self._context_tag_refs = []
         self.context_history = []
@@ -144,10 +688,30 @@ class QPostViewer:
         self.style = ttk.Style()
         self.theme_var = tk.StringVar(value=self.current_theme)
 
-        self.tree_frame = ttk.Frame(root)
-        self.tree_frame.grid(row=0, column=0, padx=10, pady=(10,0), sticky="nswe")
-        root.grid_rowconfigure(0, weight=1)
-        root.grid_columnconfigure(0, weight=1, minsize=280)
+        # --- Reverted to simple .pack() layout ---
+        self.main_content_frame = ttk.Frame(root)
+        self.main_content_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=(10,0), sticky="nsew")
+        
+        self.list_view_frame = ttk.Frame(self.main_content_frame)
+        self.list_view_frame.pack(fill=tk.BOTH, expand=True) # Start with list view packed
+        
+        # --- Multi-Clock View Setup ---
+        self.multi_clock_frame = ttk.Frame(self.main_content_frame)
+        self.clock_instances = []
+        self.clocks_initialized = False
+        self.clock_layout = "horizontal"
+        self.multi_clock_canvas = None
+        # --- End ---
+
+        self.list_view_paned_window = ttk.Panedwindow(self.list_view_frame, orient=tk.HORIZONTAL)
+        self.list_view_paned_window.pack(fill=tk.BOTH, expand=True)
+
+        self.tree_frame = ttk.Frame(self.list_view_paned_window)
+        self.list_view_paned_window.add(self.tree_frame, weight=1)
+        self.details_outer_frame = ttk.Frame(self.list_view_paned_window)
+        self.list_view_paned_window.add(self.details_outer_frame, weight=3)
+        self.tree_frame.grid_rowconfigure(0, weight=1)
+        self.tree_frame.grid_columnconfigure(0, weight=1)
 
         self.post_tree = ttk.Treeview(self.tree_frame, columns=("Post #", "Date", "Notes", "Bookmarked"), show="headings")
         self.scrollbar_y = ttk.Scrollbar(self.tree_frame, orient="vertical", command=self.post_tree.yview)
@@ -162,34 +726,24 @@ class QPostViewer:
         self.post_tree.column("Bookmarked", width=30, stretch=tk.NO, anchor='center')
         self.post_tree.grid(row=0, column=0, sticky="nswe")
         self.scrollbar_y.grid(row=0, column=1, sticky="ns")
-        self.tree_frame.grid_rowconfigure(0, weight=1)
-        self.tree_frame.grid_columnconfigure(0, weight=1)
 
         self.treeview_note_tooltip = Tooltip(self.post_tree, self._get_note_tooltip_text, delay=500)
         self.post_tree.bind("<Motion>", self._on_treeview_motion_for_tooltip)
         self.post_tree.bind("<Leave>", self._on_treeview_leave_for_tooltip)
-
-        self.details_outer_frame = ttk.Frame(root)
-        self.details_outer_frame.grid(row=0, column=1, padx=(0,10), pady=(10,0), sticky="nswe")
-        root.grid_columnconfigure(1, weight=3)
         self.text_image_paned_window = ttk.Panedwindow(self.details_outer_frame, orient=tk.HORIZONTAL)
         self.text_image_paned_window.pack(fill=tk.BOTH, expand=True)
-
         self.text_area_frame = ttk.Frame(self.text_image_paned_window)
         self.text_image_paned_window.add(self.text_area_frame, weight=1)
         self.text_area_frame.grid_rowconfigure(0, weight=1)
         self.text_area_frame.grid_columnconfigure(0, weight=1)
-
         self.post_text_area = tk.Text(self.text_area_frame, wrap=tk.WORD, relief=tk.FLAT, borderwidth=1, font=("TkDefaultFont", 11), padx=10, pady=10)
         self.default_text_area_cursor = self.post_text_area.cget("cursor")
         self.post_text_scrollbar = ttk.Scrollbar(self.text_area_frame, orient="vertical", command=self.post_text_area.yview)
         self.post_text_area.configure(yscrollcommand=self.post_text_scrollbar.set)
         self.post_text_area.grid(row=0, column=0, sticky="nswe")
         self.post_text_scrollbar.grid(row=0, column=1, sticky="ns")
-
         self.image_display_frame = ttk.Frame(self.text_image_paned_window)
         self.text_image_paned_window.add(self.image_display_frame, weight=0)
-        
         self.image_canvas = tk.Canvas(self.image_display_frame, highlightthickness=0)
         self.image_scrollbar = ttk.Scrollbar(self.image_display_frame, orient="vertical", command=self.image_canvas.yview)
         self.image_scrollable_frame = ttk.Frame(self.image_canvas)
@@ -199,17 +753,14 @@ class QPostViewer:
         self.image_canvas.pack(side="left", fill="both", expand=True)
         self.image_scrollbar.pack(side="right", fill="y")
         self.image_canvas.bind("<Configure>", lambda e: self.image_canvas.itemconfig(self.image_canvas_window, width=e.width))
-
         self.post_text_area.bind("<KeyPress>", self._prevent_text_edit)
         self.context_menu = tk.Menu(self.post_text_area, tearoff=0)
         self.post_text_area.bind("<Button-3>", self._show_context_menu)
         self.configure_text_tags()
-        
         self.text_image_paned_window.bind("<ButtonRelease-1>", self._check_sash_position)
-
+        
         controls_main_frame = ttk.Frame(root)
-        controls_main_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=(5,10), sticky="ew")
-
+        controls_main_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
         nav_frame = ttk.Frame(controls_main_frame)
         nav_frame.pack(pady=(0,5), fill=tk.X)
         self.prev_button = ttk.Button(nav_frame, text="<< Prev", command=self.prev_post, width=8)
@@ -220,7 +771,8 @@ class QPostViewer:
         self.clear_search_button.pack(side="left", padx=(5,2))
         self.post_number_label = ttk.Label(nav_frame, text="", width=35, anchor="center", font=('Arial', 11, 'bold'))
         self.post_number_label.pack(side="left", padx=5, expand=True, fill=tk.X)
-
+        self.clock_toggle_button = ttk.Button(nav_frame, text="Q Clock", command=self.toggle_clock_view)
+        self.clock_toggle_button.pack(side="right", padx=5)
         actions_frame = ttk.Labelframe(controls_main_frame, text="Search & Actions", padding=(10,5))
         actions_frame.pack(pady=5, fill=tk.X, expand=True)
         search_fields_frame = ttk.Frame(actions_frame)
@@ -235,7 +787,6 @@ class QPostViewer:
         self.keyword_entry.bind("<FocusIn>", lambda e, p=config.PLACEHOLDER_KEYWORD: self.clear_placeholder(e, p, self.keyword_entry))
         self.keyword_entry.bind("<FocusOut>", lambda e, p=config.PLACEHOLDER_KEYWORD: self.restore_placeholder(e, p, self.keyword_entry))
         self.keyword_entry.bind("<Return>", lambda event: self.search_by_keyword())
-
         search_buttons_frame = ttk.Frame(actions_frame)
         search_buttons_frame.pack(fill=tk.X, pady=(5,2))
         self.search_menu_button = ttk.Menubutton(search_buttons_frame, text="Advanced Search", style="TButton")
@@ -255,7 +806,6 @@ class QPostViewer:
         self.tools_menu.add_command(label="Help & Info", command=self.show_help_window)
         self.tools_menu_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
         Tooltip(self.tools_menu_button, lambda: "Access various utilities.")
-
         current_post_actions_frame = ttk.Frame(actions_frame)
         current_post_actions_frame.pack(fill=tk.X, pady=2)
         self.show_links_button = ttk.Button(current_post_actions_frame, text="Show Links", command=self.show_post_links_window_external, state=tk.DISABLED)
@@ -270,7 +820,6 @@ class QPostViewer:
         self.view_edit_note_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
         self.view_context_button = ttk.Button(current_post_actions_frame, text="View Context", command=self.show_context_chain_viewer_window, state=tk.DISABLED)
         self.view_context_button.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
-
         bottom_main_bar_frame = ttk.Frame(controls_main_frame)
         bottom_main_bar_frame.pack(pady=(10,0), fill=tk.X, expand=True)
         self.export_menu_button = ttk.Menubutton(bottom_main_bar_frame, text="Export", style="TButton")
@@ -308,14 +857,133 @@ class QPostViewer:
             messagebox.showerror("Critical Error", "Failed to load any post data.")
             self.root.destroy()
             return
-        
+
         self.root.after(100, self.show_welcome_message)
         self._init_complete = True
-        
-        # Set the initial sash position after a short delay
-        self.root.after(200, self.set_initial_sash_position)  
-        
+        self.root.after(200, self.set_initial_sash_position)
+
 # --- END __INIT__ ---
+
+    def _on_main_scroll(self, event):
+        """Scrolls the main multi-clock canvas horizontally or vertically."""
+        if not self.multi_clock_canvas:
+            return
+
+        # Determine direction for Windows/macOS (event.delta) or Linux (event.num)
+        if event.num == 4 or event.delta > 0:
+            scroll_dir = -1 # Scroll up or left
+        elif event.num == 5 or event.delta < 0:
+            scroll_dir = 1 # Scroll down or right
+        else:
+            return
+
+        if self.clock_layout == 'vertical':
+            self.multi_clock_canvas.yview_scroll(scroll_dir, "units")
+        else: # horizontal
+            self.multi_clock_canvas.xview_scroll(scroll_dir, "units")
+        return "break" # Prevent any other scroll bindings from firing
+
+    def toggle_clock_layout(self):
+        """Switches the clock layout between horizontal and vertical and rebuilds the view."""
+        # Toggle the layout mode
+        if self.clock_layout == "horizontal":
+            self.clock_layout = "vertical"
+        else:
+            self.clock_layout = "horizontal"
+            
+        # Destroy all the widgets inside the main clock frame
+        for widget in self.multi_clock_frame.winfo_children():
+            widget.destroy()
+            
+        # Reset the state so the clocks are rebuilt with the new layout
+        self.clock_instances = []
+        self.clocks_initialized = False
+        
+        # Call the view toggle to force the rebuild
+        self.toggle_clock_view()
+
+    def broadcast_date_highlight(self, date_str):
+        """Tells all clock instances to highlight a specific date label."""
+        # First, clear any previous highlights to prevent conflicts
+        self.clear_all_date_highlights()
+        for clock in self.clock_instances:
+            clock.highlight_date_on_ring(date_str)
+
+    def clear_all_date_highlights(self):
+        """Tells all clock instances to clear their date label highlights."""
+        for clock in self.clock_instances:
+            clock.clear_date_highlight()
+
+# --- START toggle_clock_view ---
+
+    def toggle_clock_view(self):
+        # Check if the multi-clock view is already visible
+        is_visible = self.multi_clock_frame.winfo_ismapped()
+        
+        if is_visible and not self.clocks_initialized: # This happens if a rebuild is triggered
+             pass # Proceed to rebuild
+        elif is_visible:
+            # Hide clocks, show list
+            self.multi_clock_frame.pack_forget()
+            self.list_view_frame.pack(fill=tk.BOTH, expand=True)
+            self.clock_toggle_button.config(text="Q Clock")
+            return
+        else:
+            # Hide list, show clocks
+            self.list_view_frame.pack_forget()
+
+        # This logic builds the clocks and the scrollable area
+        if not self.clocks_initialized:
+            orient_mode = "horizontal" if self.clock_layout == "horizontal" else "vertical"
+            pack_side = tk.LEFT if self.clock_layout == "horizontal" else tk.TOP
+            fill_mode = "x" if self.clock_layout == "horizontal" else "y"
+            scroll_command = "xscrollcommand" if self.clock_layout == "horizontal" else "yscrollcommand"
+
+            # --- MODIFIED: Store canvas reference and bind scroll events ---
+            self.multi_clock_canvas = tk.Canvas(self.multi_clock_frame, highlightthickness=0)
+            scrollbar = ttk.Scrollbar(self.multi_clock_frame, orient=orient_mode, command=self.multi_clock_canvas.xview if orient_mode == "horizontal" else self.multi_clock_canvas.yview)
+            
+            scrollable_inner_frame = ttk.Frame(self.multi_clock_canvas)
+
+            scrollable_inner_frame.bind(
+                "<Configure>",
+                lambda e: self.multi_clock_canvas.configure(scrollregion=self.multi_clock_canvas.bbox("all"))
+            )
+            self.multi_clock_canvas.create_window((0, 0), window=scrollable_inner_frame, anchor="nw")
+            self.multi_clock_canvas.configure(**{scroll_command: scrollbar.set})
+            
+            scrollbar.pack(side="bottom" if orient_mode == "horizontal" else "right", fill=fill_mode)
+            self.multi_clock_canvas.pack(side="left", fill="both", expand=True)
+
+            # Bind the main scroll event to the containers
+            self.multi_clock_canvas.bind("<MouseWheel>", self._on_main_scroll)
+            self.multi_clock_canvas.bind("<Button-4>", self._on_main_scroll)
+            self.multi_clock_canvas.bind("<Button-5>", self._on_main_scroll)
+            scrollable_inner_frame.bind("<MouseWheel>", self._on_main_scroll)
+            scrollable_inner_frame.bind("<Button-4>", self._on_main_scroll)
+            scrollable_inner_frame.bind("<Button-5>", self._on_main_scroll)
+            # --- END MODIFICATION ---
+
+            years = sorted(self.df_all_posts['Datetime_UTC'].dt.year.unique())
+            for year in years:
+                year_frame = ttk.Frame(scrollable_inner_frame)
+                year_frame.pack(side=pack_side, fill=tk.BOTH, expand=True, padx=10, pady=5)
+                
+                # Bind the main scroll to the year frame as well
+                year_frame.bind("<MouseWheel>", self._on_main_scroll)
+
+                ttk.Label(year_frame, text=str(year), font=("Arial", 14, "bold")).pack(pady=(5,0))
+                df_year = self.df_all_posts[self.df_all_posts['Datetime_UTC'].dt.year == year].copy()
+                clock = QClock(year_frame, self.root, self, self.style, data=df_year)
+                self.clock_instances.append(clock)
+            
+            self.clocks_initialized = True
+        
+        # Show the main clock container
+        self.multi_clock_frame.pack(fill=tk.BOTH, expand=True)
+        self.clock_toggle_button.config(text="List View")
+
+# --- END toggle_clock_view ---
 
 # --- START _PREVENT_TEXT_EDIT ---
 
@@ -2102,6 +2770,7 @@ class QPostViewer:
             "- Quoted post IDs (e.g., >>12345) are clickable to jump to that post.",
             "- Small thumbnails of images from quoted posts may appear directly within the quote.",
             "- Use 'Settings' to change the application theme and link opening preferences."
+            "- Known Issue: Some data files show the last posts (4954-4966) as being from 2022. Their correct date is late 2020."
         ]
         for tip in tips:
             ttk.Label(scrollable_content_frame, text=tip, wraplength=460, justify=tk.LEFT, font=normal_font).pack(anchor='w', padx=5, pady=1)
@@ -3088,7 +3757,4 @@ class QPostViewer:
         self.post_text_area.tag_configure("welcome_body_tag", font=("Arial", 10), spacing1=5)
         self.post_text_area.tag_configure("welcome_hint_tag", font=("Arial", 9, "italic"), justify=tk.RIGHT, foreground="grey")
         self.post_text_area.tag_configure("search_highlight_tag", background="yellow", foreground="black")
-
-# --- END CONFIGURE_TEXT_TAGS ---
-
 # --- END QPOSTVIEWER_CLASS_DEFINITION ---

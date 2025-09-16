@@ -28,7 +28,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='QView_v1.3',
+    name='QView_v1.5',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
