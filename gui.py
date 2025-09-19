@@ -117,49 +117,39 @@ class QClock:
         self.filter_show_images = tk.BooleanVar(value=True)
         self.filter_show_links = tk.BooleanVar(value=True)
         self.filter_show_text = tk.BooleanVar(value=True)
+        self.show_deltas_var = tk.BooleanVar(value=True)
 
         # Main UI Frame
         self.clock_frame = ttk.Frame(self.parent_frame)
         self.clock_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Control Panel Layout
+        # --- MODIFIED: A single, streamlined control row ---
         controls_frame = ttk.Frame(self.clock_frame)
         controls_frame.pack(fill=tk.X, pady=(5, 0), padx=20)
-        top_row = ttk.Frame(controls_frame)
-        top_row.pack(fill=tk.X)
-        bottom_row = ttk.Frame(controls_frame)
-        bottom_row.pack(fill=tk.X, pady=(2,0))
 
-        # Maximize Button (in top row)
-        maximize_button = ttk.Button(top_row, text="Maximize", width=10,
-                                     command=lambda: self.gui_instance.maximize_single_clock(self.post_data))
-        maximize_button.pack(side=tk.LEFT)
-        Tooltip(maximize_button, lambda: "Open this clock in a new, larger window.")
+        # NEW: "Tools" Menubutton
+        tools_button = ttk.Menubutton(controls_frame, text="Tools", style="TButton")
+        tools_button.pack(side=tk.LEFT)
+        tools_menu = tk.Menu(tools_button, tearoff=0)
+        tools_button["menu"] = tools_menu
+        tools_menu.add_command(label="Maximize ↗", command=lambda: self.gui_instance.maximize_single_clock(self.post_data))
+        tools_menu.add_command(label="Save as Image 💾", command=self._save_as_image)
 
-        # Filters Menubutton
-        filter_button = ttk.Menubutton(top_row, text="Filters", style="TButton")
+        # UPDATED: "Filters" Menubutton now includes "Show Deltas"
+        filter_button = ttk.Menubutton(controls_frame, text="Filters", style="TButton")
         filter_button.pack(side=tk.LEFT, padx=10)
         filter_menu = tk.Menu(filter_button, tearoff=0)
         filter_button["menu"] = filter_menu
         filter_menu.add_checkbutton(label="Show Image Posts", variable=self.filter_show_images, command=self.on_resize)
         filter_menu.add_checkbutton(label="Show Link Posts", variable=self.filter_show_links, command=self.on_resize)
         filter_menu.add_checkbutton(label="Show Text-Only Posts", variable=self.filter_show_text, command=self.on_resize)
-
-        # Show Deltas (in bottom row)
-        self.show_deltas_var = tk.BooleanVar(value=True)
-        delta_toggle = ttk.Checkbutton(bottom_row, text="Show Deltas", variable=self.show_deltas_var)
-        delta_toggle.pack(side=tk.LEFT)
-        Tooltip(delta_toggle, lambda: "Toggle highlighting of posts with the same HH:MM timestamp.")
+        filter_menu.add_separator()
+        filter_menu.add_checkbutton(label="Show Delta Connections", variable=self.show_deltas_var)
         
-        # --- NEW: Save as Image Button ---
-        save_button = ttk.Button(bottom_row, text="Save as Image", command=self._save_as_image)
-        save_button.pack(side=tk.LEFT, padx=10)
-        Tooltip(save_button, lambda: "Save the current clock view as a PNG file.")
-        # --- END NEW ---
-        
-        # Zoom Label (in bottom row)
-        self.zoom_label = ttk.Label(bottom_row, text="Zoom: 100%")
+        # Zoom Label
+        self.zoom_label = ttk.Label(controls_frame, text="Zoom: 100%")
         self.zoom_label.pack(side=tk.RIGHT, padx=10)
+        # --- END MODIFICATION ---
 
         # Canvas for the Clock
         self.canvas = tk.Canvas(self.clock_frame, bg="white", highlightthickness=0)
@@ -417,23 +407,23 @@ class QClock:
                     self._draw_dot(post_number, timestamp, dot_dist, angle, row)
                                         
     def _draw_dot(self, post_number, timestamp, dot_dist, angle, post_row):
+        """Determines the dot's color and draws it on the canvas."""
         has_image = post_row.get('Image Count', 0) > 0
         has_link = isinstance(post_row.get('Text'), str) and ('http://' in post_row['Text'] or 'https://' in post_row['Text'])
 
-        # --- NEW: Filter Logic ---
+        # Filter Logic
         if has_image and not self.filter_show_images.get(): return
         if has_link and not self.filter_show_links.get(): return
         if not has_image and not has_link and not self.filter_show_text.get(): return
-        # --- END NEW ---
 
-        # Determine color based on post content
+        # Color Logic
         dot_color = "blue"
         if has_image and has_link:
-            dot_color = "purple"
+            dot_color = "magenta"
         elif has_image:
-            dot_color = "green"
+            dot_color = "turquoise"
         elif has_link:
-            dot_color = "yellow"
+            dot_color = "orange"
 
         dot_radius = 2
         dot_x = self.center_x + dot_dist * math.cos(angle)
@@ -442,7 +432,15 @@ class QClock:
         dot = self.canvas.create_oval(dot_x - dot_radius, dot_y - dot_radius, dot_x + dot_radius, dot_y + dot_radius, 
                                       fill=dot_color, outline=dot_color, tags="post_dot")
         
-        post_info = {'pn': post_number, 'ts': timestamp.strftime("%H:%M:%S"), 'date': timestamp.strftime("%Y-%m-%d")}
+        # --- MODIFIED: Added post 'Text' to the stored info ---
+        post_info = {
+            'pn': post_number, 
+            'ts': timestamp.strftime("%H:%M:%S"),
+            'date': timestamp.strftime("%Y-%m-%d"),
+            'text': post_row.get('Text', '')
+        }
+        # --- END MODIFICATION ---
+
         self.dot_id_to_post_info[dot] = post_info
         self.post_num_to_dot_id[post_number] = dot
         self.canvas.tag_bind(dot, "<Enter>", lambda e, d_id=dot: self.show_tooltip(e, d_id))
@@ -630,10 +628,19 @@ class QClock:
         post_info = self.dot_id_to_post_info.get(dot_id)
         if not post_info: return
             
-        # --- 1. The standard tooltip window ---
-        tooltip_text = f"Q #{post_info['pn']} — {post_info['date']} {post_info['ts']}"
+        # --- FIX #2: Clean the text to remove leading post references ---
+        raw_text = post_info.get('text', '[No text available]')
+        # Use regex to find and remove any lines at the start that are just post references
+        cleaned_text = re.sub(r'^(>>\d+\s*)+', '', raw_text.strip())
+        
+        snippet = cleaned_text.replace('\n', ' ').strip()
+        if len(snippet) > 150:
+            snippet = snippet[:150].rsplit(' ', 1)[0] + '...'
+        
+        tooltip_text = f"Q #{post_info['pn']}\n\n{snippet}"
+        
         if self.show_deltas_var.get() and dot_id in self.highlighted_dots and self.delta_source_post_num:
-             tooltip_text += f"\nΔ Match with Q #{self.delta_source_post_num}"
+             tooltip_text += f"\n\nΔ Match with Q #{self.delta_source_post_num}"
 
         x, y = event.x_root + 15, event.y_root + 10
         
@@ -641,25 +648,26 @@ class QClock:
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
 
-        label = tk.Label(tw, text=tooltip_text, justify=tk.LEFT,
+        label = tk.Label(tw, text=tooltip_text, justify=tk.LEFT, wraplength=300,
                          background="#FFFFE0", relief=tk.SOLID, borderwidth=1,
                          font=("tahoma", "9", "normal"))
         label.pack(ipadx=1)
 
-        # --- 2. NEW: The on-canvas date label ---
+        # On-canvas label logic
         coords = self.canvas.coords(dot_id)
         if coords:
             dot_x, dot_y = (coords[0] + coords[2]) / 2, (coords[1] + coords[3]) / 2
             
-            # Format date as MM/DD
             date_obj = datetime.datetime.strptime(post_info['date'], "%Y-%m-%d")
-            date_label_text = date_obj.strftime("%m/%d")
+            date_label_text = date_obj.strftime("%Y/%m/%d") + f", {post_info['ts']}"
 
-            # Create a background for the text for readability
-            self.canvas.create_rectangle(dot_x - 12, dot_y - 18, dot_x + 12, dot_y - 8, 
+            # --- FIX #1: Make the on-canvas font bigger and adjust the background ---
+            # Create a wider background for the longer text
+            self.canvas.create_rectangle(dot_x - 55, dot_y - 20, dot_x + 55, dot_y - 8, 
                                          fill="white", outline="black", width=0.5, tags="transient_label")
-            self.canvas.create_text(dot_x, dot_y - 13, text=date_label_text, 
-                                    font=("Arial", 8, "bold"), fill="black", tags="transient_label")
+            self.canvas.create_text(dot_x, dot_y - 14, text=date_label_text, 
+                                    font=("Arial", 9, "bold"), fill="black", tags="transient_label")
+        # --- END MODIFICATION ---
 
     def hide_tooltip(self, event=None):
         if self.tooltip_window:
@@ -689,7 +697,6 @@ class QPostViewer:
         self.root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
         self.root.minsize(800, 600)
 
-        # Main window layout configuration
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
 
@@ -698,7 +705,10 @@ class QPostViewer:
             logo_path = os.path.join(os.getcwd(), "welcome_logo.png")
             if os.path.exists(logo_path):
                 img = Image.open(logo_path)
-                img.thumbnail((280, 280), Image.Resampling.LANCZOS)
+                # --- THIS IS THE CHANGE ---
+                # Changed thumbnail size from 280 to 800 to make it fill the pane
+                img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+                # --- END CHANGE ---
                 self.welcome_logo_photo = ImageTk.PhotoImage(img)
         except Exception as e:
             print(f"Could not load welcome logo: {e}")
@@ -731,20 +741,23 @@ class QPostViewer:
         self.style = ttk.Style()
         self.theme_var = tk.StringVar(value=self.current_theme)
 
-        # --- Reverted to simple .pack() layout ---
+        # --- Main Content Frame using grid ---
         self.main_content_frame = ttk.Frame(root)
         self.main_content_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=(10,0), sticky="nsew")
+        self.main_content_frame.grid_rowconfigure(0, weight=1)
+        self.main_content_frame.grid_columnconfigure(0, weight=1)
         
+        # Setup List View Frame
         self.list_view_frame = ttk.Frame(self.main_content_frame)
-        self.list_view_frame.pack(fill=tk.BOTH, expand=True) # Start with list view packed
+        self.list_view_frame.grid(row=0, column=0, sticky="nsew") 
         
-        # --- Multi-Clock View Setup ---
+        # Setup Multi-Clock Frame
         self.multi_clock_frame = ttk.Frame(self.main_content_frame)
+        self.multi_clock_frame.grid(row=0, column=0, sticky="new") 
+        self.multi_clock_frame.grid_remove() # Start with it hidden
         self.clock_instances = []
         self.clocks_initialized = False
         self.clock_layout = "horizontal"
-        self.multi_clock_canvas = None
-        # --- End ---
 
         self.list_view_paned_window = ttk.Panedwindow(self.list_view_frame, orient=tk.HORIZONTAL)
         self.list_view_paned_window.pack(fill=tk.BOTH, expand=True)
@@ -879,9 +892,15 @@ class QPostViewer:
         Tooltip(self.about_button, lambda: "Information about QView.")
         ttk.Button(bottom_main_bar_frame, text="Quit App", command=self.on_closing).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
 
-        if self.current_theme == "light": self.apply_light_theme()
-        elif self.current_theme == "rwb": self.apply_rwb_theme()
-        else: self.apply_dark_theme()
+        # Apply the theme on startup
+        if self.current_theme == "light":
+            self.apply_light_theme()
+        elif self.current_theme == "rwb":
+            self.apply_rwb_theme()
+        elif self.current_theme == "halloween":
+            self.apply_halloween_theme()
+        else: # Default to dark theme
+            self.apply_dark_theme()
 
         self.restore_placeholder(None, config.PLACEHOLDER_POST_NUM, self.post_entry)
         self.restore_placeholder(None, config.PLACEHOLDER_KEYWORD, self.keyword_entry)
@@ -998,39 +1017,39 @@ class QPostViewer:
             self.list_view_frame.pack_forget()
 
         if not self.clocks_initialized:
-            # Main container for controls and the clock grid
+            # Main container for global controls
             main_container = ttk.Frame(self.multi_clock_frame)
             main_container.pack(fill=tk.BOTH, expand=True)
 
-            # A top bar for global controls
             top_controls_frame = ttk.Frame(main_container)
             top_controls_frame.pack(fill=tk.X, pady=10)
             
-            # Button to open the master clock
-            master_clock_button = ttk.Button(top_controls_frame, text="View Master Clock", 
-                                             command=self.show_master_clock_window)
+            master_clock_button = ttk.Button(top_controls_frame, text="View Master Clock", command=self.show_master_clock_window)
             master_clock_button.pack(side=tk.LEFT, padx=20)
             
-            # Container for the grid of clocks
-            clock_grid_container = ttk.Frame(main_container)
-            clock_grid_container.pack(fill=tk.BOTH, expand=True)
+            # A PanedWindow to split clocks from the legend
+            dashboard_paned_window = ttk.Panedwindow(main_container, orient=tk.HORIZONTAL)
+            dashboard_paned_window.pack(fill=tk.BOTH, expand=True)
 
+            # Left side: The clock grid
+            clock_grid_container = ttk.Frame(dashboard_paned_window)
+            dashboard_paned_window.add(clock_grid_container, weight=4)
+
+            # Right side: The legend
+            legend_container_frame = ttk.Frame(dashboard_paned_window)
+            dashboard_paned_window.add(legend_container_frame, weight=1)
+            
             years = sorted(self.df_all_posts['Datetime_UTC'].dt.year.unique())
             
-            max_cols = 3
+            max_cols = 2
+            
             num_rows = (len(years) + max_cols - 1) // max_cols
 
-            # Configure the grid rows and columns to share space equally
-            for i in range(max_cols):
-                clock_grid_container.grid_columnconfigure(i, weight=1)
-            for i in range(num_rows):
-                clock_grid_container.grid_rowconfigure(i, weight=1)
+            for i in range(max_cols): clock_grid_container.grid_columnconfigure(i, weight=1)
+            for i in range(num_rows): clock_grid_container.grid_rowconfigure(i, weight=1)
 
             for i, year in enumerate(years):
-                # Calculate the row and column for the current clock
-                row = i // max_cols
-                col = i % max_cols
-                
+                row, col = i // max_cols, i % max_cols
                 year_frame = ttk.Frame(clock_grid_container)
                 year_frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
                 
@@ -1039,19 +1058,9 @@ class QPostViewer:
                 clock = QClock(year_frame, self.root, self, self.style, data=df_year)
                 self.clock_instances.append(clock)
             
-            # This is the full, two-column legend section
-            legend_col = len(years) % max_cols
-            legend_row = len(years) // max_cols
-            
-            legend_frame = ttk.Labelframe(clock_grid_container, text="Legend")
-            legend_frame.grid(row=legend_row, column=legend_col, padx=5, pady=5, sticky="nsew")
-            legend_frame.grid_columnconfigure((0, 1), weight=1) # Allow two columns to share space
-
-            # Create sub-frames for each column
-            line_legend_frame = ttk.Frame(legend_frame)
-            line_legend_frame.grid(row=0, column=0, sticky="nw", padx=5)
-            dot_legend_frame = ttk.Frame(legend_frame)
-            dot_legend_frame.grid(row=0, column=1, sticky="nw", padx=5)
+            # --- MODIFIED: Single-column legend ---
+            legend_frame = ttk.Labelframe(legend_container_frame, text="Legend", padding=10)
+            legend_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
             def create_legend_item(parent, color, text):
                 item_frame = ttk.Frame(parent)
@@ -1059,20 +1068,24 @@ class QPostViewer:
                 box.pack(side=tk.LEFT, padx=(5, 5))
                 label = ttk.Label(item_frame, text=text)
                 label.pack(side=tk.LEFT, padx=(0, 10))
-                return item_frame
+                # All items will be packed directly into the main legend_frame
+                item_frame.pack(anchor="w", pady=4, padx=5)
 
-            # Populate the first column (Line Legend)
-            create_legend_item(line_legend_frame, "red", "Time Delta").pack(anchor="w", pady=3)
-            create_legend_item(line_legend_frame, "cyan", "Time Mirror").pack(anchor="w", pady=3)
-            create_legend_item(line_legend_frame, "yellow", "Post # Mirror").pack(anchor="w", pady=3)
-            create_legend_item(line_legend_frame, "green", "Date Mirror").pack(anchor="w", pady=3)
-            create_legend_item(line_legend_frame, "purple", "Multi-Select").pack(anchor="w", pady=3)
+            # Dot Color Legend first
+            create_legend_item(legend_frame, "magenta", "Image + Link")
+            create_legend_item(legend_frame, "turquoise", "Post w/ Image")
+            create_legend_item(legend_frame, "orange", "Post w/ Link")
+            create_legend_item(legend_frame, "blue", "Text-Only Post")
             
-            # Populate the second column (Dot Color Legend)
-            create_legend_item(dot_legend_frame, "purple", "Image + Link").pack(anchor="w", pady=3)
-            create_legend_item(dot_legend_frame, "green", "Post w/ Image").pack(anchor="w", pady=3)
-            create_legend_item(dot_legend_frame, "yellow", "Post w/ Link").pack(anchor="w", pady=3)
-            create_legend_item(dot_legend_frame, "blue", "Text-Only Post").pack(anchor="w", pady=3)
+            ttk.Separator(legend_frame, orient='horizontal').pack(fill='x', pady=8, padx=5)
+
+            # Line/Selection Legend
+            create_legend_item(legend_frame, "red", "Time Delta")
+            create_legend_item(legend_frame, "cyan", "Time Mirror")
+            create_legend_item(legend_frame, "yellow", "Post # Mirror")
+            create_legend_item(legend_frame, "green", "Date Mirror")
+            create_legend_item(legend_frame, "purple", "Multi-Select")
+            # --- END MODIFICATION ---
 
             self.clocks_initialized = True
         
@@ -2713,7 +2726,10 @@ class QPostViewer:
             dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
         self.settings_win.configure(bg=dialog_bg)
 
-        self.settings_win.geometry("400x280") # Increased height slightly
+        # --- THIS IS THE FIX ---
+        self.settings_win.geometry("400x340") # Increased height from 300 to 340
+        # --- END FIX ---
+        
         self.settings_win.transient(self.root)
         self.settings_win.grab_set()
         self.settings_win.resizable(False, False)
@@ -2730,46 +2746,46 @@ class QPostViewer:
         ttk.Radiobutton(theme_frame, text="Dark", variable=self.settings_theme_var, value="dark", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
         ttk.Radiobutton(theme_frame, text="Light", variable=self.settings_theme_var, value="light", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
         ttk.Radiobutton(theme_frame, text="RWB", variable=self.settings_theme_var, value="rwb", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
-        # --- NEW: Halloween Radio Button ---
         ttk.Radiobutton(theme_frame, text="Halloween", variable=self.settings_theme_var, value="halloween", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
-
-        # Link Opening Preference (no changes here)
+        
+        # Link Opening Preference
         link_pref_frame = ttk.Labelframe(main_frame, text="Link Opening Preference", padding="10")
         link_pref_frame.pack(fill="x", pady=5)
         self.settings_link_pref_var = tk.StringVar(value=self.app_settings.get("link_opening_preference", settings.DEFAULT_SETTINGS.get("link_opening_preference", "default")))
-        ttk.Radiobutton(link_pref_frame, text="System Default Browser", variable=self.settings_link_pref_var, value="default", command=self.on_setting_change).pack(anchor="w", padx=5)
-        ttk.Radiobutton(link_pref_frame, text="Google Chrome (Incognito, if available)", variable=self.settings_link_pref_var, value="chrome_incognito", command=self.on_setting_change).pack(anchor="w", padx=5)
         
-        # Highlight Abbreviations Checkbox (no changes here)
+        ttk.Radiobutton(link_pref_frame, text="System Default Browser", variable=self.settings_link_pref_var, value="default", command=self.on_setting_change).pack(anchor="w", padx=5)
+        ttk.Radiobutton(link_pref_frame, text="Google Chrome (Incognito)", variable=self.settings_link_pref_var, value="chrome_incognito", command=self.on_setting_change).pack(anchor="w", padx=5)
+        
+        # Highlight Abbreviations Checkbox
         abbreviations_frame = ttk.Labelframe(main_frame, text="Content Highlighting", padding="10")
         abbreviations_frame.pack(fill="x", pady=5)
         self.settings_highlight_abbreviations_var = tk.BooleanVar(value=self.app_settings.get("highlight_abbreviations", settings.DEFAULT_SETTINGS.get("highlight_abbreviations")))
         ttk.Checkbutton(abbreviations_frame, text="Highlight Abbreviations in Post Text", variable=self.settings_highlight_abbreviations_var, command=self.on_setting_change).pack(anchor="w", padx=5)
 
-        # Close Button (no changes here)
+        # Close Button
         close_button_frame = ttk.Frame(main_frame)
         close_button_frame.pack(side="bottom", fill=tk.X, pady=(10,0))
         ttk.Button(close_button_frame, text="Close", command=self.on_settings_window_close).pack(pady=5)
 
     def on_setting_change(self, event=None):
-        """Handles changes from the Settings window."""
-        # Theme
+        """Handles changes from the Settings window and saves them."""
+        # --- Theme ---
         new_theme = self.settings_theme_var.get()
         if self.current_theme != new_theme:
-            self._set_theme(new_theme) # Call the central handler which also saves
+            self._set_theme(new_theme)
             
-            # Highlight Abbreviations
+        # --- Highlight Abbreviations ---
         new_highlight_abbreviations = self.settings_highlight_abbreviations_var.get()
         if self.app_settings.get("highlight_abbreviations") != new_highlight_abbreviations:
             self.app_settings["highlight_abbreviations"] = new_highlight_abbreviations
             settings.save_settings(self.app_settings)
             print(f"Highlight abbreviations saved: '{new_highlight_abbreviations}'")
 
-# Link Opening Preference
+        # --- Link Opening Preference ---
         new_link_pref = self.settings_link_pref_var.get()
         if self.app_settings.get("link_opening_preference") != new_link_pref:
             self.app_settings["link_opening_preference"] = new_link_pref
-            settings.save_settings(self.app_settings) # Save immediately
+            settings.save_settings(self.app_settings)
             print(f"Link preference saved: '{new_link_pref}'")
         
     def on_settings_window_close(self):
@@ -3699,36 +3715,49 @@ class QPostViewer:
 
 # --- START apply_light_theme ---
     def apply_light_theme(self):
-        self.current_theme = "light"; self.style.theme_use('clam')
-        bg_color="#f0f0f0"; fg_color="#000000"; entry_bg="#ffffff"; button_bg="#e1e1e1"; button_active_bg="#d1d1d1"
-        tree_bg="#ffffff"; tree_sel_bg="#0078D7"; tree_sel_fg="#ffffff"; heading_bg="#e1e1e1"
-        progress_trough = '#dcdcdc'; progress_bar_color = '#4CAF50'
-        
-        self.root.configure(bg=bg_color); self.style.configure(".", background=bg_color, foreground=fg_color, font=('Arial',10))
-        self.style.configure("TFrame", background=bg_color); self.style.configure("TLabel", background=bg_color, foreground=fg_color, padding=3)
-        self.style.configure("TButton", background=button_bg, foreground=fg_color, padding=5, font=('Arial',9,'bold'), borderwidth=1, relief=tk.RAISED)
-        self.style.map("TButton", background=[("active",button_active_bg),("pressed","#c1c1c1")], relief=[("pressed",tk.SUNKEN)])
-        self.style.configure("Treeview", background=tree_bg, foreground=fg_color, fieldbackground=tree_bg, borderwidth=1, relief=tk.FLAT)
-        self.style.map("Treeview", background=[("selected",tree_sel_bg)], foreground=[("selected",tree_sel_fg)])
-        self.style.configure("Treeview.Heading", background=heading_bg, foreground=fg_color, font=('Arial',10,'bold'), relief=tk.FLAT, padding=3)
-        self.style.configure("TEntry", fieldbackground=entry_bg, foreground=fg_color, insertbackground=fg_color, relief=tk.SUNKEN, borderwidth=1)
-        self.style.configure("TLabelframe", background=bg_color, foreground=fg_color, relief=tk.GROOVE, borderwidth=1, padding=5)
-        self.style.configure("TLabelframe.Label", background=bg_color, foreground=fg_color, font=('Arial',10,'bold'))
-        
-        self.style.configure("Contrasting.Horizontal.TProgressbar", troughcolor=progress_trough, background=progress_bar_color, thickness=20)
+        """Applies a standard light theme."""
+        self.current_theme = "light"
+        self.style.theme_use('vista')
 
-        self.post_text_area.configure(bg=entry_bg, fg=fg_color, insertbackground=fg_color, selectbackground=tree_sel_bg)
-        if hasattr(self,'image_display_frame'): self.image_display_frame.configure(style="TFrame")
-        self.post_text_area.tag_configure("bold_label", foreground="#333333"); self.post_text_area.tag_configure("post_number_val", foreground="#D9534F")
-        # --- MODIFIED: Abbreviation tag to use background instead of foreground for highlighting ---
-        self.post_text_area.tag_configure("abbreviation_tag", background=config.ABBREVIATION_HIGHLIGHT_COLOR, foreground="white") # Text will be white on red
-        # --- END MODIFIED ---
-        self.post_text_area.tag_configure("date_val", foreground="#5CB85C"); self.post_text_area.tag_configure("author_val", foreground="#555555")
-        self.post_text_area.tag_configure("themes_val", foreground="#8E44AD"); self.post_text_area.tag_configure("image_val", foreground="#337AB7")
-        self.post_text_area.tag_configure("clickable_link_style", foreground=self.link_label_fg_light); self.post_text_area.tag_configure("bookmarked_header", foreground="#F0AD4E")
-        self.post_text_area.tag_configure("quoted_ref_header", foreground="#4A4A4A"); self.post_text_area.tag_configure("quoted_ref_text_body", foreground="#B8860B")
-        self.post_text_area.tag_configure("welcome_title_tag", foreground="#D9534F"); self.post_text_area.tag_configure("welcome_text_tag", foreground="#000000")
-        self.post_text_area.tag_configure("welcome_emphasis_tag", foreground="#8E44AD"); self.post_text_area.tag_configure("welcome_closing_tag", foreground="#5CB85C")
+        bg = "#f0f0f0"
+        fg = "#000000"
+        entry_bg = "#ffffff"
+        btn_bg = "#e1e1e1"
+        btn_active = "#c0c0c0"
+        tree_sel_bg = "#0078d7"
+        tree_sel_fg = "#ffffff"
+        heading_bg = "#e1e1e1"
+        link_color = self.link_label_fg_light
+
+        self.root.configure(bg=bg)
+        self.style.configure(".", background=bg, foreground=fg, font=('Arial', 10))
+        self.style.configure("TFrame", background=bg)
+        self.style.configure("TLabel", background=bg, foreground=fg, padding=3)
+        self.style.configure("TButton", background=btn_bg, foreground=fg, padding=5, font=('Arial', 9, 'bold'), borderwidth=1, relief=tk.RAISED)
+        self.style.map("TButton", background=[("active", btn_active)])
+        self.style.configure("Treeview", background=entry_bg, foreground=fg, fieldbackground=entry_bg, borderwidth=1, relief=tk.FLAT)
+        self.style.map("Treeview", background=[("selected", tree_sel_bg)], foreground=[("selected", tree_sel_fg)])
+        self.style.configure("Treeview.Heading", background=heading_bg, foreground=fg, font=('Arial', 10, 'bold'), relief=tk.FLAT, padding=3)
+        self.style.configure("TEntry", fieldbackground=entry_bg, foreground=fg, insertbackground=fg)
+        self.style.configure("TLabelframe", background=bg, foreground=fg)
+        self.style.configure("TLabelframe.Label", background=bg, foreground=fg, font=('Arial', 10, 'bold'))
+
+        self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
+        # --- THIS IS THE FIX ---
+        if hasattr(self, 'image_canvas'):
+            self.image_canvas.configure(bg=entry_bg)
+        
+        # Configure Text widget tags
+        self.post_text_area.tag_configure("bold_label", foreground="#333333", font=('Arial', 11, 'bold'))
+        self.post_text_area.tag_configure("post_number_val", foreground="#0056b3")
+        self.post_text_area.tag_configure("bookmarked_header", foreground="#b30000")
+        self.post_text_area.tag_configure("abbreviation_tag", background="#d0eaff", foreground="#000000")
+        self.post_text_area.tag_configure("date_val", foreground="#555555")
+        self.post_text_area.tag_configure("themes_val", foreground="#0056b3")
+        self.post_text_area.tag_configure("clickable_link_style", foreground=link_color, underline=True)
+        self.post_text_area.tag_configure("welcome_title_tag", font=('Arial', 24, 'bold'), foreground="#333333", justify='center')
+        self.post_text_area.tag_configure("quoted_ref_header", foreground="#555555")
+        self.post_text_area.tag_configure("quoted_ref_text_body", foreground="#333333")
 # --- END apply_light_theme ---
 
 # --- START apply_rwb_theme ---
@@ -3791,44 +3820,46 @@ class QPostViewer:
         self.current_theme = "halloween"
         self.style.theme_use('clam')
         
-        # New, brighter color palette
-        bg = "#1c1c1c"           # Black
-        fg = "#ffffff"           # White text
-        entry_bg = "#2d2d2d"      # Dark gray
-        btn_bg = "#4a4a4a"       # Medium gray
-        tree_sel_bg = "#ff7f00"  # Bright Orange
-        tree_sel_fg = "#000000"  # Black text on orange
-        heading_bg = "#333333"
-        link_color = "#ffff00"   # Bright Yellow
-        accent_purple = "#9400d3"# Spooky Purple
-        accent_green = "#39ff14" # Slime Green
-
+        # --- New, vibrant Halloween color palette ---
+        bg = "#2c1b47"           # Deep dark purple
+        fg = "#ffcc99"           # Pale orange/cream text
+        entry_bg = "#3e2a63"      # Lighter purple for entries/treeview
+        btn_bg = "#b35900"       # Muted, dark orange for buttons
+        btn_active = "#cc6600"   # Brighter orange for active buttons
+        tree_sel_bg = "#7fff00"  # Slime Green / Chartreuse for selections
+        tree_sel_fg = "#000000"  # Black text on green
+        heading_bg = "#3e2a63"
+        link_color = "#ff9933"   # Bright orange for links
+        accent_white = "#ffffff" # Pure white for specific accents
+        
         self.root.configure(bg=bg)
         self.style.configure(".", background=bg, foreground=fg, font=('Arial', 10))
         self.style.configure("TFrame", background=bg)
         self.style.configure("TLabel", background=bg, foreground=fg, padding=3)
-        self.style.configure("TButton", background=btn_bg, foreground=fg, padding=5, font=('Arial', 9, 'bold'), borderwidth=1, relief=tk.RAISED)
-        self.style.map("TButton", background=[("active", "#5f5f5f")])
+        self.style.configure("TButton", background=btn_bg, foreground=accent_white, padding=5, font=('Arial', 9, 'bold'), borderwidth=1, relief=tk.RAISED)
+        self.style.map("TButton", background=[("active", btn_active)])
         self.style.configure("Treeview", background=entry_bg, foreground=fg, fieldbackground=entry_bg, borderwidth=1, relief=tk.FLAT)
         self.style.map("Treeview", background=[("selected", tree_sel_bg)], foreground=[("selected", tree_sel_fg)])
-        self.style.configure("Treeview.Heading", background=heading_bg, foreground=fg, font=('Arial', 10, 'bold'), relief=tk.FLAT, padding=3)
+        self.style.configure("Treeview.Heading", background=heading_bg, foreground=accent_white, font=('Arial', 10, 'bold'), relief=tk.FLAT, padding=3)
         self.style.configure("TEntry", fieldbackground=entry_bg, foreground=fg, insertbackground=fg)
         self.style.configure("TLabelframe", background=bg, foreground=fg)
-        self.style.configure("TLabelframe.Label", background=bg, foreground=fg, font=('Arial', 10, 'bold'))
+        self.style.configure("TLabelframe.Label", background=bg, foreground=link_color, font=('Arial', 10, 'bold'))
         
         # Configure Text widget and Image Canvas
         self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
         if hasattr(self, 'image_canvas'): self.image_canvas.configure(bg=entry_bg)
 
         # Apply vibrant accents to text tags
-        self.post_text_area.tag_configure("bold_label", foreground=link_color) # Yellow
-        self.post_text_area.tag_configure("post_number_val", foreground=link_color) # Yellow
-        self.post_text_area.tag_configure("bookmarked_header", foreground=tree_sel_bg) # Orange
+        self.post_text_area.tag_configure("bold_label", foreground=link_color)
+        self.post_text_area.tag_configure("post_number_val", foreground=link_color)
+        self.post_text_area.tag_configure("bookmarked_header", foreground="#ffd700")
         self.post_text_area.tag_configure("abbreviation_tag", background=tree_sel_bg, foreground=tree_sel_fg)
-        self.post_text_area.tag_configure("date_val", foreground=accent_green) # Green
-        self.post_text_area.tag_configure("themes_val", foreground=accent_purple) # Purple
+        self.post_text_area.tag_configure("date_val", foreground=fg)
+        self.post_text_area.tag_configure("themes_val", foreground=accent_white)
         self.post_text_area.tag_configure("clickable_link_style", foreground=link_color, underline=True)
-        self.post_text_area.tag_configure("welcome_title_tag", foreground=tree_sel_bg) # Orange
+        self.post_text_area.tag_configure("welcome_title_tag", foreground=tree_sel_bg)
+        self.post_text_area.tag_configure("quoted_ref_header", foreground=link_color)
+        self.post_text_area.tag_configure("quoted_ref_text_body", foreground=fg)
 # --- END apply_halloween_theme ---
 
 # --- START SET_THEME ---
@@ -3843,12 +3874,12 @@ class QPostViewer:
             self.apply_light_theme()
         elif theme_name == "rwb":
             self.apply_rwb_theme()
-        # --- NEW: Halloween theme condition ---
         elif theme_name == "halloween":
             self.apply_halloween_theme()
         
         self.app_settings["theme"] = theme_name
         self.theme_var.set(theme_name)
+        # This is the crucial line that saves the setting to the file
         settings.save_settings(self.app_settings)
         print(f"Theme changed and saved: '{theme_name}'")
 
