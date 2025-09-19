@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkcalendar import Calendar
 from PIL import Image, ImageTk
+import io
 import pandas as pd
 import datetime
 import os
@@ -110,22 +111,54 @@ class QClock:
         self.hover_highlighted_dots = set()
         self.zoom_threshold_days = 2.0
         self.zoom_threshold_hours = 10.0
-        self.spiral_start_radius = 20 # Add this line
+        self.spiral_start_radius = 20
+        
+        # Filter State Variables
+        self.filter_show_images = tk.BooleanVar(value=True)
+        self.filter_show_links = tk.BooleanVar(value=True)
+        self.filter_show_text = tk.BooleanVar(value=True)
 
         # Main UI Frame
         self.clock_frame = ttk.Frame(self.parent_frame)
         self.clock_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Top Controls Frame
+        # Control Panel Layout
         controls_frame = ttk.Frame(self.clock_frame)
-        controls_frame.pack(fill=tk.X, pady=(10, 0), padx=20)
-        
+        controls_frame.pack(fill=tk.X, pady=(5, 0), padx=20)
+        top_row = ttk.Frame(controls_frame)
+        top_row.pack(fill=tk.X)
+        bottom_row = ttk.Frame(controls_frame)
+        bottom_row.pack(fill=tk.X, pady=(2,0))
+
+        # Maximize Button (in top row)
+        maximize_button = ttk.Button(top_row, text="Maximize", width=10,
+                                     command=lambda: self.gui_instance.maximize_single_clock(self.post_data))
+        maximize_button.pack(side=tk.LEFT)
+        Tooltip(maximize_button, lambda: "Open this clock in a new, larger window.")
+
+        # Filters Menubutton
+        filter_button = ttk.Menubutton(top_row, text="Filters", style="TButton")
+        filter_button.pack(side=tk.LEFT, padx=10)
+        filter_menu = tk.Menu(filter_button, tearoff=0)
+        filter_button["menu"] = filter_menu
+        filter_menu.add_checkbutton(label="Show Image Posts", variable=self.filter_show_images, command=self.on_resize)
+        filter_menu.add_checkbutton(label="Show Link Posts", variable=self.filter_show_links, command=self.on_resize)
+        filter_menu.add_checkbutton(label="Show Text-Only Posts", variable=self.filter_show_text, command=self.on_resize)
+
+        # Show Deltas (in bottom row)
         self.show_deltas_var = tk.BooleanVar(value=True)
-        delta_toggle = ttk.Checkbutton(controls_frame, text="Show Deltas", variable=self.show_deltas_var)
+        delta_toggle = ttk.Checkbutton(bottom_row, text="Show Deltas", variable=self.show_deltas_var)
         delta_toggle.pack(side=tk.LEFT)
         Tooltip(delta_toggle, lambda: "Toggle highlighting of posts with the same HH:MM timestamp.")
         
-        self.zoom_label = ttk.Label(controls_frame, text="Zoom: 100%")
+        # --- NEW: Save as Image Button ---
+        save_button = ttk.Button(bottom_row, text="Save as Image", command=self._save_as_image)
+        save_button.pack(side=tk.LEFT, padx=10)
+        Tooltip(save_button, lambda: "Save the current clock view as a PNG file.")
+        # --- END NEW ---
+        
+        # Zoom Label (in bottom row)
+        self.zoom_label = ttk.Label(bottom_row, text="Zoom: 100%")
         self.zoom_label.pack(side=tk.RIGHT, padx=10)
 
         # Canvas for the Clock
@@ -147,10 +180,128 @@ class QClock:
         self.canvas.bind("<MouseWheel>", self._on_mousewheel_zoom)
         self.canvas.bind("<Button-4>", self._on_mousewheel_zoom)
         self.canvas.bind("<Button-5>", self._on_mousewheel_zoom)
-        self.canvas.bind("<ButtonPress-2>", self._on_pan_start)
-        self.canvas.bind("<B2-Motion>", self._on_pan_move)
+        self.canvas.bind("<ButtonPress-1>", self._on_pan_start)
+        self.canvas.bind("<B1-Motion>", self._on_pan_move)
 # --- END __INIT__ ---
 
+    def _draw_concentric_guides(self):
+        """Draws concentric circles to mark year boundaries on the spiral plot."""
+        if self.post_data is None or self.post_data.empty: return
+
+        # We need to sort the data by date to find the first post of each year
+        sorted_data = self.post_data.sort_values(by='Datetime_UTC').reset_index()
+        total_posts = len(sorted_data)
+        
+        # Find the index of the first post for each unique year
+        year_start_indices = sorted_data.groupby(sorted_data['Datetime_UTC'].dt.year)['index'].min()
+
+        min_dot_dist = self.spiral_start_radius
+        max_dot_dist = self.radius - 20
+
+        for year, start_index in year_start_indices.items():
+            # Don't draw a ring for the very first post, as it's at the start of the spiral
+            if start_index == 0: continue
+
+            # Calculate the radius for this year's first post using the same logic as plot_posts
+            normalized_index = start_index / (total_posts - 1)
+            radius = min_dot_dist + (normalized_index * (max_dot_dist - min_dot_dist))
+
+            # Draw the faint, dashed circle
+            self.canvas.create_oval(self.center_x - radius, self.center_y - radius,
+                                    self.center_x + radius, self.center_y + radius,
+                                    outline="lightgrey", dash=(4, 4), tags="grid")
+            
+            # Add a year label on top of the circle for clarity
+            self.canvas.create_text(self.center_x, self.center_y - radius - 8,
+                                    text=str(year), font=("Arial", 8, "italic"),
+                                    fill="grey", tags="grid")
+
+    def _save_as_image(self):
+        """Saves the current state of the canvas to a PNG image file."""
+        try:
+            from PIL import Image, EpsImagePlugin
+            import io
+            # This helps Pillow's PostScript parser find the Ghostscript executable if needed
+            EpsImagePlugin.gs_windows_exe = 'gs' 
+        except ImportError:
+            messagebox.showerror("Missing Library", 
+                                 "The 'Pillow' library is required to save images.\n\nPlease install it by running:\npip install Pillow",
+                                 parent=self.root)
+            return
+
+        # Ask the user where to save the file
+        filepath = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save Clock as Image",
+            defaultextension=".png",
+            filetypes=[("PNG Image", "*.png"), ("All files", "*.*")],
+            initialfile=f"qclock_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        )
+
+        if not filepath: # User cancelled the dialog
+            return
+
+        try:
+            # Generate a PostScript representation of the canvas in memory
+            ps_data = self.canvas.postscript(colormode='color')
+            
+            # Use Pillow to open the PostScript data and save it as a PNG
+            img = Image.open(io.BytesIO(ps_data.encode('utf-8')))
+            img.save(filepath, 'png')
+            
+            messagebox.showinfo("Success", f"Clock image saved successfully to:\n{filepath}", parent=self.root)
+        
+        except Exception as e:
+            messagebox.showerror("Save Error", f"An error occurred while saving the image:\n{e}", parent=self.root)
+
+    def _draw_concentric_guides(self):
+        """Draws concentric circles to mark year boundaries on the spiral plot."""
+        if self.post_data.empty: return
+
+        sorted_data = self.post_data.sort_values(by='Datetime_UTC').reset_index()
+        total_posts = len(sorted_data)
+        
+        # Find the unique years and their first post's index in the sorted data
+        year_start_indices = sorted_data.groupby(sorted_data['Datetime_UTC'].dt.year)['index'].min()
+
+        min_dot_dist = self.spiral_start_radius
+        max_dot_dist = self.radius - 20
+
+        for year, start_index in year_start_indices.items():
+            if start_index == 0: continue # Don't draw a ring for the very first post
+
+            # Calculate the radius for this year's first post
+            normalized_index = start_index / (total_posts - 1)
+            radius = min_dot_dist + (normalized_index * (max_dot_dist - min_dot_dist))
+
+            # Draw the faint, dashed circle
+            self.canvas.create_oval(self.center_x - radius, self.center_y - radius,
+                                    self.center_x + radius, self.center_y + radius,
+                                    outline="lightgrey", dash=(4, 4), tags="grid")
+            
+            # Add a year label on the circle
+            self.canvas.create_text(self.center_x, self.center_y - radius - 8,
+                                    text=str(year), font=("Arial", 8, "italic"),
+                                    fill="grey", tags="grid")
+
+    def _draw_today_highlight(self):
+        """Draws a faint slice on the clock to indicate the current day of the year."""
+        today = datetime.datetime.now()
+        day_of_year = today.timetuple().tm_yday
+
+        # --- CORRECTED FORMULA ---
+        # This formula correctly maps Jan 1st to the top of the clock (90 degrees)
+        angle = 90 - ((day_of_year - 1) / 365.25 * 360.0)
+        extent = -(360 / 365.25) # Use a negative extent for clockwise drawing
+        # --- END CORRECTION ---
+
+        self.canvas.create_arc(self.center_x - self.radius, self.center_y - self.radius,
+                                self.center_x + self.radius, self.center_y + self.radius,
+                                start=angle, extent=extent,
+                                style=tk.PIESLICE, fill="yellow", 
+                                stipple="gray25",
+                                outline="", tags="grid")
+                                
     def _draw_center_hub(self):
         """Draws the detailed inner clock face and sets the starting radius for the spiral."""
         hub_radius = self.radius * 0.3
@@ -189,17 +340,17 @@ class QClock:
         # 4. Draw the central text
         self.canvas.create_text(self.center_x, self.center_y, text="QView Clock", font=("Arial", 10, "bold"), fill="black", tags="grid")
 
-    def on_resize(self, event):
+    def on_resize(self, event=None):
         """Handles window resizing. Redraws everything."""
         self.canvas.delete("all")
         
-        self.draw_clock() # Draws the main outer circle
-        
-        # Draw the new hub in the center
+        self.draw_clock()
+        self._draw_today_highlight()
         self._draw_center_hub()
         
         if self.plot_mode == "spiral":
             self._draw_spiral_guides()
+            self._draw_concentric_guides() # This is the new line
 
         # Draw the dynamic Level-of-Detail grid
         self._draw_month_grid()
@@ -266,23 +417,31 @@ class QClock:
                     self._draw_dot(post_number, timestamp, dot_dist, angle, row)
                                         
     def _draw_dot(self, post_number, timestamp, dot_dist, angle, post_row):
-        """Determines the dot's color and draws it on the canvas."""
+        has_image = post_row.get('Image Count', 0) > 0
+        has_link = isinstance(post_row.get('Text'), str) and ('http://' in post_row['Text'] or 'https://' in post_row['Text'])
+
+        # --- NEW: Filter Logic ---
+        if has_image and not self.filter_show_images.get(): return
+        if has_link and not self.filter_show_links.get(): return
+        if not has_image and not has_link and not self.filter_show_text.get(): return
+        # --- END NEW ---
+
         # Determine color based on post content
-        dot_color = "blue" # Default for text-only
-        if post_row.get('Image Count', 0) > 0:
+        dot_color = "blue"
+        if has_image and has_link:
+            dot_color = "purple"
+        elif has_image:
             dot_color = "green"
-        elif isinstance(post_row.get('Text'), str) and ('http://' in post_row['Text'] or 'https://' in post_row['Text']):
+        elif has_link:
             dot_color = "yellow"
 
         dot_radius = 2
         dot_x = self.center_x + dot_dist * math.cos(angle)
         dot_y = self.center_y + dot_dist * math.sin(angle)
         
-        # Create the dot on the canvas
         dot = self.canvas.create_oval(dot_x - dot_radius, dot_y - dot_radius, dot_x + dot_radius, dot_y + dot_radius, 
                                       fill=dot_color, outline=dot_color, tags="post_dot")
         
-        # Store its info and bind events
         post_info = {'pn': post_number, 'ts': timestamp.strftime("%H:%M:%S"), 'date': timestamp.strftime("%Y-%m-%d")}
         self.dot_id_to_post_info[dot] = post_info
         self.post_num_to_dot_id[post_number] = dot
@@ -416,25 +575,45 @@ class QClock:
         self.canvas.itemconfig("hour_grid", state='normal' if self.zoom_level >= self.zoom_threshold_hours else 'hidden')
 
     def _draw_month_grid(self):
+        """Draws the 12 month labels and lines."""
         months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
         for i, month in enumerate(months):
-            angle = math.radians(i * 30 - 90)
-            x1, y1 = self.center_x + (self.radius - 15) * math.cos(angle), self.center_y + (self.radius - 15) * math.sin(angle)
-            x2, y2 = self.center_x + self.radius * math.cos(angle), self.center_y + self.radius * math.sin(angle)
+            # --- CORRECTED FORMULA ---
+            angle_deg = 90 - (i * 30)
+            angle_rad = math.radians(angle_deg)
+            text_angle_rad = math.radians(angle_deg - 15) # Center text in the slice
+            # --- END CORRECTION ---
+            
+            x1 = self.center_x + (self.radius - 15) * math.cos(angle_rad)
+            y1 = self.center_y - (self.radius - 15) * math.sin(angle_rad) # Use minus for y-axis
+            x2 = self.center_x + self.radius * math.cos(angle_rad)
+            y2 = self.center_y - self.radius * math.sin(angle_rad) # Use minus for y-axis
             self.canvas.create_line(x1, y1, x2, y2, fill="lightgrey", tags=("grid", "month_grid"))
-            text_x, text_y = self.center_x + (self.radius + 15) * math.cos(math.radians(i*30-75)), self.center_y + (self.radius+15) * math.sin(math.radians(i*30-75))
+            
+            text_x = self.center_x + (self.radius + 15) * math.cos(text_angle_rad)
+            text_y = self.center_y - (self.radius + 15) * math.sin(text_angle_rad) # Use minus for y-axis
             self.canvas.create_text(text_x, text_y, text=month, font=("Arial", 9, "bold"), fill="darkgrey", tags=("grid", "month_grid"))
-
+            
     def _draw_day_grid(self):
-        for day in range(1, 366, 5):
-            angle = math.radians((day / 365.0) * 360 - 90)
-            x1, y1 = self.center_x + self.radius * math.cos(angle), self.center_y + self.radius * math.sin(angle)
-            x2, y2 = self.center_x + (self.radius+5) * math.cos(angle), self.center_y + (self.radius+5) * math.sin(angle)
-            self.canvas.create_line(x1, y1, x2, y2, fill="lightgrey", tags=("grid", "day_grid"), state='hidden')
-            text_x, text_y = self.center_x + (self.radius+15) * math.cos(angle), self.center_y + (self.radius+15) * math.sin(angle)
-            date = datetime.datetime(2023, 1, 1) + datetime.timedelta(days=day - 1)
-            self.canvas.create_text(text_x, text_y, text=date.strftime("%m/%d"), font=("Arial", 7), fill="grey", tags=("grid", "day_grid"), state='hidden')
+        """Draws the 365 day lines and labels (initially hidden)."""
+        for day_of_year in range(1, 366, 5):
+            # --- CORRECTED FORMULA ---
+            angle_deg = 90 - ((day_of_year -1) / 365.0 * 360)
+            angle_rad = math.radians(angle_deg)
+            # --- END CORRECTION ---
 
+            x1 = self.center_x + self.radius * math.cos(angle_rad)
+            y1 = self.center_y - self.radius * math.sin(angle_rad) # Use minus for y-axis
+            x2 = self.center_x + (self.radius + 5) * math.cos(angle_rad)
+            y2 = self.center_y - (self.radius + 5) * math.sin(angle_rad) # Use minus for y-axis
+            self.canvas.create_line(x1, y1, x2, y2, fill="lightgrey", tags=("grid", "day_grid"), state='hidden')
+
+            text_x = self.center_x + (self.radius + 15) * math.cos(angle_rad)
+            text_y = self.center_y - (self.radius + 15) * math.sin(angle_rad) # Use minus for y-axis
+            date = datetime.datetime(2023, 1, 1) + datetime.timedelta(days=day_of_year - 1)
+            date_str = date.strftime("%m/%d")
+            self.canvas.create_text(text_x, text_y, text=date_str, font=("Arial", 7), fill="grey", tags=("grid", "day_grid"), state='hidden')
+    
     def _draw_hour_grid(self):
         for hour in range(24):
             angle = math.radians((hour / 24.0) * 360 - 90)
@@ -819,26 +998,39 @@ class QPostViewer:
             self.list_view_frame.pack_forget()
 
         if not self.clocks_initialized:
+            # Main container for controls and the clock grid
             main_container = ttk.Frame(self.multi_clock_frame)
             main_container.pack(fill=tk.BOTH, expand=True)
 
+            # A top bar for global controls
             top_controls_frame = ttk.Frame(main_container)
             top_controls_frame.pack(fill=tk.X, pady=10)
             
-            master_clock_button = ttk.Button(top_controls_frame, text="View Master Clock", command=self.show_master_clock_window)
+            # Button to open the master clock
+            master_clock_button = ttk.Button(top_controls_frame, text="View Master Clock", 
+                                             command=self.show_master_clock_window)
             master_clock_button.pack(side=tk.LEFT, padx=20)
             
+            # Container for the grid of clocks
             clock_grid_container = ttk.Frame(main_container)
             clock_grid_container.pack(fill=tk.BOTH, expand=True)
 
             years = sorted(self.df_all_posts['Datetime_UTC'].dt.year.unique())
+            
             max_cols = 3
             num_rows = (len(years) + max_cols - 1) // max_cols
-            for i in range(max_cols): clock_grid_container.grid_columnconfigure(i, weight=1)
-            for i in range(num_rows): clock_grid_container.grid_rowconfigure(i, weight=1)
+
+            # Configure the grid rows and columns to share space equally
+            for i in range(max_cols):
+                clock_grid_container.grid_columnconfigure(i, weight=1)
+            for i in range(num_rows):
+                clock_grid_container.grid_rowconfigure(i, weight=1)
 
             for i, year in enumerate(years):
-                row, col = i // max_cols, i % max_cols
+                # Calculate the row and column for the current clock
+                row = i // max_cols
+                col = i % max_cols
+                
                 year_frame = ttk.Frame(clock_grid_container)
                 year_frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
                 
@@ -847,7 +1039,7 @@ class QPostViewer:
                 clock = QClock(year_frame, self.root, self, self.style, data=df_year)
                 self.clock_instances.append(clock)
             
-            # --- MODIFIED: Two-column legend layout ---
+            # This is the full, two-column legend section
             legend_col = len(years) % max_cols
             legend_row = len(years) // max_cols
             
@@ -877,10 +1069,10 @@ class QPostViewer:
             create_legend_item(line_legend_frame, "purple", "Multi-Select").pack(anchor="w", pady=3)
             
             # Populate the second column (Dot Color Legend)
+            create_legend_item(dot_legend_frame, "purple", "Image + Link").pack(anchor="w", pady=3)
             create_legend_item(dot_legend_frame, "green", "Post w/ Image").pack(anchor="w", pady=3)
             create_legend_item(dot_legend_frame, "yellow", "Post w/ Link").pack(anchor="w", pady=3)
             create_legend_item(dot_legend_frame, "blue", "Text-Only Post").pack(anchor="w", pady=3)
-            # --- END MODIFICATION ---
 
             self.clocks_initialized = True
         
@@ -2521,7 +2713,7 @@ class QPostViewer:
             dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
         self.settings_win.configure(bg=dialog_bg)
 
-        self.settings_win.geometry("400x250") # Adjusted height as abbrev. highlight is removed
+        self.settings_win.geometry("400x280") # Increased height slightly
         self.settings_win.transient(self.root)
         self.settings_win.grab_set()
         self.settings_win.resizable(False, False)
@@ -2530,35 +2722,31 @@ class QPostViewer:
         main_frame = ttk.Frame(self.settings_win, padding="10")
         main_frame.pack(expand=True, fill=tk.BOTH)
 
-# --- Theme Setting ---
+        # Theme Setting
         theme_frame = ttk.Labelframe(main_frame, text="Display Theme", padding="10")
         theme_frame.pack(fill="x", pady=5)
         self.settings_theme_var = tk.StringVar(value=self.app_settings.get("theme", settings.DEFAULT_SETTINGS.get("theme")))
         
-# We now use the main _set_theme method directly from the radio buttons
         ttk.Radiobutton(theme_frame, text="Dark", variable=self.settings_theme_var, value="dark", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
         ttk.Radiobutton(theme_frame, text="Light", variable=self.settings_theme_var, value="light", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
         ttk.Radiobutton(theme_frame, text="RWB", variable=self.settings_theme_var, value="rwb", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
+        # --- NEW: Halloween Radio Button ---
+        ttk.Radiobutton(theme_frame, text="Halloween", variable=self.settings_theme_var, value="halloween", command=self.on_setting_change).pack(side="left", padx=5, expand=True)
 
-# --- Link Opening Preference ---
+        # Link Opening Preference (no changes here)
         link_pref_frame = ttk.Labelframe(main_frame, text="Link Opening Preference", padding="10")
         link_pref_frame.pack(fill="x", pady=5)
         self.settings_link_pref_var = tk.StringVar(value=self.app_settings.get("link_opening_preference", settings.DEFAULT_SETTINGS.get("link_opening_preference", "default")))
+        ttk.Radiobutton(link_pref_frame, text="System Default Browser", variable=self.settings_link_pref_var, value="default", command=self.on_setting_change).pack(anchor="w", padx=5)
+        ttk.Radiobutton(link_pref_frame, text="Google Chrome (Incognito, if available)", variable=self.settings_link_pref_var, value="chrome_incognito", command=self.on_setting_change).pack(anchor="w", padx=5)
         
-        rb_default = ttk.Radiobutton(link_pref_frame, text="System Default Browser", variable=self.settings_link_pref_var, value="default", command=self.on_setting_change)
-        rb_default.pack(anchor="w", padx=5)
-        rb_chrome_incognito = ttk.Radiobutton(link_pref_frame, text="Google Chrome (Incognito, if available)", variable=self.settings_link_pref_var, value="chrome_incognito", command=self.on_setting_change)
-        rb_chrome_incognito.pack(anchor="w", padx=5)
-        
-        # --- Highlight Abbreviations Checkbox ---
+        # Highlight Abbreviations Checkbox (no changes here)
         abbreviations_frame = ttk.Labelframe(main_frame, text="Content Highlighting", padding="10")
         abbreviations_frame.pack(fill="x", pady=5)
         self.settings_highlight_abbreviations_var = tk.BooleanVar(value=self.app_settings.get("highlight_abbreviations", settings.DEFAULT_SETTINGS.get("highlight_abbreviations")))
-
         ttk.Checkbutton(abbreviations_frame, text="Highlight Abbreviations in Post Text", variable=self.settings_highlight_abbreviations_var, command=self.on_setting_change).pack(anchor="w", padx=5)
 
-
-# --- Close Button ---
+        # Close Button (no changes here)
         close_button_frame = ttk.Frame(main_frame)
         close_button_frame.pack(side="bottom", fill=tk.X, pady=(10,0))
         ttk.Button(close_button_frame, text="Close", command=self.on_settings_window_close).pack(pady=5)
@@ -2935,15 +3123,28 @@ class QPostViewer:
     
     def show_gematria_calculator_window(self, initial_text=""):
         """Creates and shows a standalone window for Gematria calculations."""
+        # --- Nested helper function defined first ---
+        def _calculate_and_display():
+            text_to_calc = self.gematria_input_entry.get()
+            if text_to_calc:
+                results = utils.calculate_gematria(text_to_calc)
+                self.gematria_simple_var.set(f"Simple / Ordinal: {results.get('simple', 0)}")
+                self.gematria_reverse_var.set(f"Reverse Ordinal: {results.get('reverse', 0)}")
+                self.gematria_hebrew_var.set(f"Hebrew / Jewish: {results.get('hebrew', 0)}")
+                self.gematria_english_var.set(f"English (Agrippa): {results.get('english', 0)}")
+
+        # --- Main method logic begins ---
         if hasattr(self, 'gematria_win') and self.gematria_win.winfo_exists():
             self.gematria_win.lift()
             self.gematria_win.focus_set()
             if initial_text and hasattr(self, 'gematria_input_entry'):
-                 self.gematria_input_entry.delete(0, tk.END)
-                 self.gematria_input_entry.insert(0, initial_text)
-                 self.gematria_input_entry.focus_set()
- # Automatically calculate when opened from context menu
-                 self._calculate_and_display_gematria_in_window(initial_text)
+                self.gematria_input_entry.delete(0, tk.END)
+                self.gematria_input_entry.insert(0, initial_text)
+                self.gematria_input_entry.focus_set()
+                # --- THIS IS THE FIX ---
+                # Call the local helper function defined above
+                _calculate_and_display()
+                # --- END FIX ---
             return
 
         self.gematria_win = tk.Toplevel(self.root)
@@ -2982,15 +3183,6 @@ class QPostViewer:
         ttk.Label(results_frame, textvariable=self.gematria_reverse_var, font=('Arial', 10, 'bold')).pack(anchor="w")
         ttk.Label(results_frame, textvariable=self.gematria_hebrew_var, font=('Arial', 10, 'bold')).pack(anchor="w")
         ttk.Label(results_frame, textvariable=self.gematria_english_var, font=('Arial', 10, 'bold')).pack(anchor="w")
-        
-        def _calculate_and_display():
-            text_to_calc = self.gematria_input_entry.get()
-            if text_to_calc:
-                results = utils.calculate_gematria(text_to_calc)
-                self.gematria_simple_var.set(f"Simple / Ordinal: {results.get('simple', 0)}")
-                self.gematria_reverse_var.set(f"Reverse Ordinal: {results.get('reverse', 0)}")
-                self.gematria_hebrew_var.set(f"Hebrew / Jewish: {results.get('hebrew', 0)}")
-                self.gematria_english_var.set(f"English (Agrippa): {results.get('english', 0)}")
         
         self.gematria_input_entry.bind("<Return>", lambda e: _calculate_and_display())
 
@@ -3593,6 +3785,52 @@ class QPostViewer:
         self.restore_placeholder(None, config.PLACEHOLDER_KEYWORD, self.keyword_entry)
 # --- END apply_rwb_theme ---
 
+# --- START apply_halloween_theme ---
+    def apply_halloween_theme(self):
+        """Applies a vibrant, spooky Halloween theme."""
+        self.current_theme = "halloween"
+        self.style.theme_use('clam')
+        
+        # New, brighter color palette
+        bg = "#1c1c1c"           # Black
+        fg = "#ffffff"           # White text
+        entry_bg = "#2d2d2d"      # Dark gray
+        btn_bg = "#4a4a4a"       # Medium gray
+        tree_sel_bg = "#ff7f00"  # Bright Orange
+        tree_sel_fg = "#000000"  # Black text on orange
+        heading_bg = "#333333"
+        link_color = "#ffff00"   # Bright Yellow
+        accent_purple = "#9400d3"# Spooky Purple
+        accent_green = "#39ff14" # Slime Green
+
+        self.root.configure(bg=bg)
+        self.style.configure(".", background=bg, foreground=fg, font=('Arial', 10))
+        self.style.configure("TFrame", background=bg)
+        self.style.configure("TLabel", background=bg, foreground=fg, padding=3)
+        self.style.configure("TButton", background=btn_bg, foreground=fg, padding=5, font=('Arial', 9, 'bold'), borderwidth=1, relief=tk.RAISED)
+        self.style.map("TButton", background=[("active", "#5f5f5f")])
+        self.style.configure("Treeview", background=entry_bg, foreground=fg, fieldbackground=entry_bg, borderwidth=1, relief=tk.FLAT)
+        self.style.map("Treeview", background=[("selected", tree_sel_bg)], foreground=[("selected", tree_sel_fg)])
+        self.style.configure("Treeview.Heading", background=heading_bg, foreground=fg, font=('Arial', 10, 'bold'), relief=tk.FLAT, padding=3)
+        self.style.configure("TEntry", fieldbackground=entry_bg, foreground=fg, insertbackground=fg)
+        self.style.configure("TLabelframe", background=bg, foreground=fg)
+        self.style.configure("TLabelframe.Label", background=bg, foreground=fg, font=('Arial', 10, 'bold'))
+        
+        # Configure Text widget and Image Canvas
+        self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
+        if hasattr(self, 'image_canvas'): self.image_canvas.configure(bg=entry_bg)
+
+        # Apply vibrant accents to text tags
+        self.post_text_area.tag_configure("bold_label", foreground=link_color) # Yellow
+        self.post_text_area.tag_configure("post_number_val", foreground=link_color) # Yellow
+        self.post_text_area.tag_configure("bookmarked_header", foreground=tree_sel_bg) # Orange
+        self.post_text_area.tag_configure("abbreviation_tag", background=tree_sel_bg, foreground=tree_sel_fg)
+        self.post_text_area.tag_configure("date_val", foreground=accent_green) # Green
+        self.post_text_area.tag_configure("themes_val", foreground=accent_purple) # Purple
+        self.post_text_area.tag_configure("clickable_link_style", foreground=link_color, underline=True)
+        self.post_text_area.tag_configure("welcome_title_tag", foreground=tree_sel_bg) # Orange
+# --- END apply_halloween_theme ---
+
 # --- START SET_THEME ---
     def _set_theme(self, theme_name):
         """Sets the application theme and saves the setting."""
@@ -3605,6 +3843,9 @@ class QPostViewer:
             self.apply_light_theme()
         elif theme_name == "rwb":
             self.apply_rwb_theme()
+        # --- NEW: Halloween theme condition ---
+        elif theme_name == "halloween":
+            self.apply_halloween_theme()
         
         self.app_settings["theme"] = theme_name
         self.theme_var.set(theme_name)
