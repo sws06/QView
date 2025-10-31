@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkcalendar import Calendar
 from PIL import Image, ImageTk
+from collections import defaultdict
 import io
 import pandas as pd
 import datetime
@@ -705,10 +706,7 @@ class QPostViewer:
             logo_path = os.path.join(os.getcwd(), "welcome_logo.png")
             if os.path.exists(logo_path):
                 img = Image.open(logo_path)
-                # --- THIS IS THE CHANGE ---
-                # Changed thumbnail size from 280 to 800 to make it fill the pane
                 img.thumbnail((800, 800), Image.Resampling.LANCZOS)
-                # --- END CHANGE ---
                 self.welcome_logo_photo = ImageTk.PhotoImage(img)
         except Exception as e:
             print(f"Could not load welcome logo: {e}")
@@ -721,6 +719,7 @@ class QPostViewer:
         self._context_tag_refs = []
         self.context_history = []
         self._is_navigating_context_back = False
+        self.calendar_first_open = True
 
         self.app_settings = settings.load_settings()
         self.bookmarked_posts = utils.load_bookmarks_from_file(config.BOOKMARKS_FILE_PATH)
@@ -732,16 +731,17 @@ class QPostViewer:
         self.current_display_idx = -1
 
         self.current_theme = self.app_settings.get("theme", settings.DEFAULT_SETTINGS["theme"])
+        
         self.placeholder_fg_color_dark = "grey"
         self.placeholder_fg_color_light = "#757575"
         self.link_label_fg_dark = "#6DAEFF"
         self.link_label_fg_light = "#0056b3"
-        self.highlight_abbreviations_var = tk.BooleanVar(value=self.app_settings.get("highlight_abbreviations", settings.DEFAULT_SETTINGS["highlight_abbreviations"]))
+        self.highlight_abbreviations_var = tk.BooleanVar(value=self.app_settings.get("highlight_abbreviations", settings.DEFAULT_SETTINGS.get("highlight_abbreviations")))
 
         self.style = ttk.Style()
         self.theme_var = tk.StringVar(value=self.current_theme)
 
-        # --- Main Content Frame using grid ---
+        # --- Main Content Frame ---
         self.main_content_frame = ttk.Frame(root)
         self.main_content_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=(10,0), sticky="nsew")
         self.main_content_frame.grid_rowconfigure(0, weight=1)
@@ -754,16 +754,31 @@ class QPostViewer:
         # Setup Multi-Clock Frame
         self.multi_clock_frame = ttk.Frame(self.main_content_frame)
         self.multi_clock_frame.grid(row=0, column=0, sticky="new") 
-        self.multi_clock_frame.grid_remove() # Start with it hidden
+        self.multi_clock_frame.grid_remove()
         self.clock_instances = []
         self.clocks_initialized = False
         self.clock_layout = "horizontal"
 
+        # Setup Threads View Frame
+        self.threads_view_frame = ttk.Frame(self.main_content_frame)
+        self.threads_view_frame.grid(row=0, column=0, sticky="nsew")
+        self.threads_view_frame.grid_remove() 
+        self._setup_threads_view()
+        
+        # --- NEW: Setup Symbols View Frame ---
+        self.symbols_view_frame = ttk.Frame(self.main_content_frame)
+        self.symbols_view_frame.grid(row=0, column=0, sticky="nsew")
+        self.symbols_view_frame.grid_remove()
+        self._setup_symbols_view()
+        # --- END NEW ---
+        
         self.list_view_paned_window = ttk.Panedwindow(self.list_view_frame, orient=tk.HORIZONTAL)
         self.list_view_paned_window.pack(fill=tk.BOTH, expand=True)
 
         self.tree_frame = ttk.Frame(self.list_view_paned_window)
-        self.list_view_paned_window.add(self.tree_frame, weight=1)
+        # --- THIS IS THE FIX ---
+        self.list_view_paned_window.add(self.tree_frame, weight=1) # Corrected variable name
+        # --- END FIX ---
         self.details_outer_frame = ttk.Frame(self.list_view_paned_window)
         self.list_view_paned_window.add(self.details_outer_frame, weight=3)
         self.tree_frame.grid_rowconfigure(0, weight=1)
@@ -798,11 +813,11 @@ class QPostViewer:
         self.post_text_area.configure(yscrollcommand=self.post_text_scrollbar.set)
         self.post_text_area.grid(row=0, column=0, sticky="nswe")
         self.post_text_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.image_display_frame = ttk.Frame(self.text_image_paned_window)
+        self.image_display_frame = ttk.Frame(self.text_image_paned_window, style="Entry.TFrame")
         self.text_image_paned_window.add(self.image_display_frame, weight=0)
         self.image_canvas = tk.Canvas(self.image_display_frame, highlightthickness=0)
         self.image_scrollbar = ttk.Scrollbar(self.image_display_frame, orient="vertical", command=self.image_canvas.yview)
-        self.image_scrollable_frame = ttk.Frame(self.image_canvas)
+        self.image_scrollable_frame = ttk.Frame(self.image_canvas, style="Entry.TFrame")
         self.image_scrollable_frame.bind("<Configure>", lambda e: self.image_canvas.configure(scrollregion=self.image_canvas.bbox("all")))
         self.image_canvas_window = self.image_canvas.create_window((0, 0), window=self.image_scrollable_frame, anchor="nw")
         self.image_canvas.configure(yscrollcommand=self.image_scrollbar.set)
@@ -827,8 +842,16 @@ class QPostViewer:
         self.clear_search_button.pack(side="left", padx=(5,2))
         self.post_number_label = ttk.Label(nav_frame, text="", width=35, anchor="center", font=('Arial', 11, 'bold'))
         self.post_number_label.pack(side="left", padx=5, expand=True, fill=tk.X)
-        self.clock_toggle_button = ttk.Button(nav_frame, text="Q Clock", command=self.toggle_clock_view)
-        self.clock_toggle_button.pack(side="right", padx=5)
+        
+        self.list_view_button = ttk.Button(nav_frame, text="List", command=self.show_list_view)
+        self.list_view_button.pack(side="right", padx=2)
+        self.threads_view_button = ttk.Button(nav_frame, text="Threads", command=self.show_threads_view)
+        self.threads_view_button.pack(side="right", padx=2)
+        self.symbols_view_button = ttk.Button(nav_frame, text="Symbols", command=self.show_symbols_view)
+        self.symbols_view_button.pack(side="right", padx=2)
+        self.clock_view_button = ttk.Button(nav_frame, text="Q Clock", command=self.show_clock_view)
+        self.clock_view_button.pack(side="right", padx=2)
+        
         actions_frame = ttk.Labelframe(controls_main_frame, text="Search & Actions", padding=(10,5))
         actions_frame.pack(pady=5, fill=tk.X, expand=True)
         search_fields_frame = ttk.Frame(actions_frame)
@@ -915,6 +938,24 @@ class QPostViewer:
             self.df_all_posts = self.df_all_posts.reset_index(drop=True)
             self.df_displayed = self.df_all_posts.copy()
             self.repopulate_treeview(self.df_displayed, select_first_item=False)
+            
+            # --- NEW: Prepare data for calendar highlighting and info ---
+            # Create a set of unique dates that have posts for quick lookups
+            self.dates_with_posts = set(pd.to_datetime(self.df_all_posts['Datetime_UTC'].dt.date).unique())
+            
+            # Create a dictionary mapping each date to a list of its posts (Post #, Year)
+            temp_df = self.df_all_posts.dropna(subset=['Datetime_UTC', 'Post Number']).copy()
+            temp_df['date_only'] = pd.to_datetime(temp_df['Datetime_UTC'].dt.date)
+            self.date_to_posts_map = temp_df.groupby('date_only').apply(
+                lambda x: sorted(list(set(zip(x['Post Number'].astype(int), x['Datetime_UTC'].dt.year))))
+            ).to_dict()
+            # --- END NEW ---
+            
+            # --- NEW: Get the min/max dates for the calendar bounds ---
+            self.min_post_date = self.df_all_posts['Datetime_UTC'].min().date()
+            self.max_post_date = self.df_all_posts['Datetime_UTC'].max().date()
+            # --- END NEW ---
+            
         elif self.df_all_posts is None:
             messagebox.showerror("Critical Error", "Failed to load any post data.")
             self.root.destroy()
@@ -924,6 +965,257 @@ class QPostViewer:
         self._init_complete = True
         self.root.after(200, self.set_initial_sash_position)
 # --- END __INIT__ ---
+
+    def _get_heatmap_color(self, count, max_count):
+        """Calculates a color from a gradient based on the symbol count."""
+        if count == 0:
+            return "#f0f0f0" # Light grey for zero
+        
+        # Normalize count to a 0.0-1.0 scale, using a log scale for better visual contrast
+        normalized_count = math.log(1 + count) / math.log(1 + max_count)
+        
+        # Simple gradient: grey -> yellow -> red
+        if normalized_count < 0.5:
+            # Interpolate between grey (#cccccc) and yellow (#ffff00)
+            red = int(0xcc + (0xff - 0xcc) * (normalized_count * 2))
+            green = int(0xcc + (0xff - 0xcc) * (normalized_count * 2))
+            blue = int(0xcc + (0x00 - 0xcc) * (normalized_count * 2))
+        else:
+            # Interpolate between yellow (#ffff00) and red (#ff0000)
+            red = 0xff
+            green = int(0xff + (0x00 - 0xff) * ((normalized_count - 0.5) * 2))
+            blue = 0
+            
+        return f"#{red:02x}{green:02x}{blue:02x}"
+
+    def _on_symbol_select(self, event):
+        """Called when a symbol is selected. Gathers all selected symbols and redraws the heatmap."""
+        selected_items = self.symbols_tree.selection()  # Use .selection() to get all selected items
+        if not selected_items:
+            self._draw_symbol_heatmap(selected_symbols=None) # Default to "All Symbols" if nothing is selected
+            return
+    
+        # Convert the selected item IDs to a list of symbol names
+        selected_symbols_list = [self.symbols_tree.item(item_id, "text") for item_id in selected_items]
+    
+        # Pass the whole list to the drawing function
+        self._draw_symbol_heatmap(selected_symbols=selected_symbols_list)
+
+    def _get_heatmap_color(self, count, max_count):
+        """Calculates a color from a gradient based on the symbol count."""
+        if count == 0:
+            return "#f0f0f0" # Light grey for zero
+        
+        # Normalize count to a 0.0-1.0 scale
+        normalized_count = min(count / max_count, 1.0)
+        
+        # Simple gradient: grey -> yellow -> red
+        if normalized_count < 0.5:
+            # Interpolate between grey (#e0e0e0) and yellow (#ffff00)
+            red = int(0xe0 + (0xff - 0xe0) * (normalized_count * 2))
+            green = int(0xe0 + (0xff - 0xe0) * (normalized_count * 2))
+            blue = int(0xe0 + (0x00 - 0xe0) * (normalized_count * 2))
+        else:
+            # Interpolate between yellow (#ffff00) and red (#ff0000)
+            red = 0xff
+            green = int(0xff + (0x00 - 0xff) * ((normalized_count - 0.5) * 2))
+            blue = 0
+            
+        return f"#{red:02x}{green:02x}{blue:02x}"
+
+    def _draw_symbol_heatmap(self, selected_symbols=None):
+        # The code inside the function should be indented 8 spaces
+        """Draws the symbol density timeline on its canvas for one or more symbols."""
+        self.heatmap_canvas.delete("all")
+        
+        timeline_data = {}
+        title = "Symbol Density Timeline: "
+
+        if selected_symbols:
+            # --- NEW: AGGREGATION LOGIC ---
+            aggregated_timeline = defaultdict(int)
+            for symbol in selected_symbols:
+                individual_timeline = app_data.per_symbol_timeline.get(symbol, {})
+                for date, count in individual_timeline.items():
+                    aggregated_timeline[date] += count
+            
+            timeline_data = dict(aggregated_timeline)
+            
+            if len(selected_symbols) > 3:
+                title += f"{len(selected_symbols)} Symbols Selected"
+            else:
+                title += ", ".join(selected_symbols)
+        else:
+            timeline_data = app_data.symbol_timeline
+            title += "All Symbols"
+
+        self.heatmap_canvas.master.config(text=title)
+
+        if not timeline_data: return
+
+        # (The rest of the drawing logic is the same)
+        canvas_width = self.heatmap_canvas.winfo_width()
+        canvas_height = self.heatmap_canvas.winfo_height()
+        if canvas_width < 2 or canvas_height < 2: return
+
+        start_date = self.df_all_posts['Datetime_UTC'].min().date()
+        end_date = self.df_all_posts['Datetime_UTC'].max().date()
+        total_days = (end_date - start_date).days
+        if total_days == 0: return
+
+        max_count = float(max(timeline_data.values()) if timeline_data else 1)
+        bar_width = canvas_width / total_days
+
+        current_date = start_date
+        for i in range(total_days + 1):
+            count = timeline_data.get(current_date, 0)
+            color = self._get_heatmap_color(count, max_count)
+            x0 = i * bar_width
+            x1 = (i + 1) * bar_width
+            self.heatmap_canvas.create_rectangle(x0, 0, x1, canvas_height, fill=color, outline="")
+            current_date += datetime.timedelta(days=1)
+
+    def _setup_symbols_view(self):
+        """Creates the widgets for the Symbol Map view using a PanedWindow."""
+        # The code inside the function is indented one level further
+        symbols_paned_window = ttk.Panedwindow(self.symbols_view_frame, orient=tk.VERTICAL)
+        symbols_paned_window.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # --- Top pane for the Symbol List ---
+        list_frame = ttk.Frame(symbols_paned_window)
+        symbols_paned_window.add(list_frame)
+
+        # (Setup for the Treeview and Scrollbar inside list_frame)
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
+        self.symbols_tree = ttk.Treeview(list_frame, columns=("Aliases", "Description"), show="tree headings", selectmode='extended')
+        symbols_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.symbols_tree.yview)
+        self.symbols_tree.configure(yscrollcommand=symbols_scrollbar.set)
+        self.symbols_tree.heading("#0", text="Symbol")
+        self.symbols_tree.heading("Aliases", text="Aliases")
+        self.symbols_tree.heading("Description", text="Description")
+        self.symbols_tree.column("#0", width=150, stretch=tk.NO)
+        self.symbols_tree.column("Aliases", width=250)
+        self.symbols_tree.column("Description", width=400)
+        self.symbols_tree.grid(row=0, column=0, sticky="nsew")
+        symbols_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.symbols_tree.bind("<<TreeviewSelect>>", self._on_symbol_select)
+        
+        # --- Bottom pane for the Heatmap ---
+        heatmap_frame = ttk.Labelframe(symbols_paned_window, text="Symbol Density Timeline",
+                                     padding=10, height=150)
+        symbols_paned_window.add(heatmap_frame)
+
+        # (Setup for the widgets inside the heatmap_frame)
+        show_all_btn = ttk.Button(heatmap_frame, text="Show All Symbols", command=self._draw_symbol_heatmap)
+        show_all_btn.pack(anchor="ne", pady=(0, 5))
+        self.heatmap_canvas = tk.Canvas(heatmap_frame, bg="white", highlightthickness=0)
+        self.heatmap_canvas.pack(fill=tk.BOTH, expand=True)
+
+    def _populate_symbols_view(self):
+        """Clears and populates the symbols treeview from the loaded symbol_map."""
+        for i in self.symbols_tree.get_children():
+            self.symbols_tree.delete(i)
+            
+        # The symbol_map is loaded from data.py
+        for symbol, data in sorted(app_data.symbol_map.items()):
+            aliases = ", ".join(data.get("aliases", []))
+            description = data.get("description", "")
+            self.symbols_tree.insert("", "end", text=symbol, values=(aliases, description))
+
+    def _setup_threads_view(self):
+        """Creates the widgets for the Narrative Threads view."""
+        self.threads_view_frame.grid_rowconfigure(0, weight=1)
+        self.threads_view_frame.grid_columnconfigure(0, weight=1)
+
+        # --- THIS IS THE FIX ---
+        # Changed show="headings" to show="tree headings" to make the main column visible
+        self.threads_tree = ttk.Treeview(self.threads_view_frame, columns=("Date Span", "Posts"), show="tree headings")
+        # --- END FIX ---
+        
+        threads_scrollbar = ttk.Scrollbar(self.threads_view_frame, orient="vertical", command=self.threads_tree.yview)
+        self.threads_tree.configure(yscrollcommand=threads_scrollbar.set)
+        
+        # --- THIS IS THE FIX ---
+        # Added a heading for the main hierarchical column ("#0")
+        self.threads_tree.heading("#0", text="Narrative Thread / Post")
+        # --- END FIX ---
+        
+        self.threads_tree.heading("Date Span", text="Date Span")
+        self.threads_tree.heading("Posts", text="# Posts")
+        self.threads_tree.column("#0", width=400) 
+        self.threads_tree.column("Date Span", width=250, anchor='center')
+        self.threads_tree.column("Posts", width=100, anchor='center')
+
+        self.threads_tree.grid(row=0, column=0, sticky="nsew")
+        threads_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        self.threads_tree.tag_configure("theme_row", font=('Arial', 11, 'bold'))
+
+    def _populate_threads_view(self):
+        """Clears and populates the threads treeview with themed posts."""
+        # Clear existing data
+        for i in self.threads_tree.get_children():
+            self.threads_tree.delete(i)
+
+        # Group posts by theme
+        for theme, post_numbers in app_data.theme_posts_map.items():
+            if not post_numbers: continue
+
+            theme_posts_df = self.df_all_posts[self.df_all_posts['Post Number'].isin(post_numbers)]
+            if theme_posts_df.empty: continue
+
+            # Calculate date span and post count for the theme
+            min_date = theme_posts_df['Datetime_UTC'].min().strftime('%Y-%m-%d')
+            max_date = theme_posts_df['Datetime_UTC'].max().strftime('%Y-%m-%d')
+            date_span = f"{min_date} to {max_date}" if min_date != max_date else min_date
+            post_count = len(theme_posts_df)
+
+            # Insert the main theme row
+            theme_id = self.threads_tree.insert("", "end", text=f" {theme.replace('_', ' ').title()}", 
+                                                values=(date_span, post_count), tags=("theme_row",))
+            
+            # Insert the individual posts as children of the theme row
+            for _, post in theme_posts_df.sort_values(by='Datetime_UTC').iterrows():
+                post_text_preview = str(post['Text']).replace('\n', ' ').strip()[:80] + "..."
+                self.threads_tree.insert(theme_id, "end", text=f"  #{post['Post Number']}: {post_text_preview}",
+                                         values=(post['Datetime_UTC'].strftime('%Y-%m-%d %H:%M'), ""))
+
+    def show_list_view(self):
+        """Shows the main post list view."""
+        self.multi_clock_frame.grid_remove()
+        self.threads_view_frame.grid_remove()
+        self.symbols_view_frame.grid_remove()
+        self.list_view_frame.grid()
+
+    def show_clock_view(self):
+        """Shows the multi-clock dashboard view."""
+        self.list_view_frame.grid_remove()
+        self.threads_view_frame.grid_remove()
+        self.symbols_view_frame.grid_remove()
+        self.multi_clock_frame.grid()
+        if not self.clocks_initialized:
+            self.build_clock_view()
+
+    def show_threads_view(self):
+        """Shows the narrative threads view."""
+        self.list_view_frame.grid_remove()
+        self.multi_clock_frame.grid_remove()
+        self.symbols_view_frame.grid_remove()
+        self.threads_view_frame.grid()
+        self._populate_threads_view()
+        
+    def show_symbols_view(self):
+        """Shows the symbol map view and populates its widgets."""
+        self.list_view_frame.grid_remove()
+        self.multi_clock_frame.grid_remove()
+        self.threads_view_frame.grid_remove()
+        self.symbols_view_frame.grid()
+        
+        # Populate both the list and the heatmap
+        self._populate_symbols_view()
+        # Use .after() to give the canvas a moment to be drawn before we measure it
+        self.root.after(50, self._draw_symbol_heatmap)    
 
     def maximize_single_clock(self, year_data):
         """Creates a new window for a single year's Q Clock."""
@@ -1006,92 +1298,76 @@ class QPostViewer:
         for clock in self.clock_instances:
             clock.clear_date_highlight()
 
-# --- START toggle_clock_view ---
-    def toggle_clock_view(self, force_rebuild=False):
-        if self.multi_clock_frame.winfo_ismapped() and not force_rebuild:
-            self.multi_clock_frame.pack_forget()
-            self.list_view_frame.pack(fill=tk.BOTH, expand=True)
-            self.clock_toggle_button.config(text="Q Clock")
-            return
-        else:
-            self.list_view_frame.pack_forget()
+# --- START build_clock_view ---
+    def build_clock_view(self):
+        """Builds all the widgets for the multi-clock dashboard view."""
+        if self.clocks_initialized:
+            return # Don't rebuild if already built
 
-        if not self.clocks_initialized:
-            # Main container for global controls
-            main_container = ttk.Frame(self.multi_clock_frame)
-            main_container.pack(fill=tk.BOTH, expand=True)
+        # Main container for global controls
+        main_container = ttk.Frame(self.multi_clock_frame)
+        main_container.pack(fill=tk.BOTH, expand=True)
 
-            top_controls_frame = ttk.Frame(main_container)
-            top_controls_frame.pack(fill=tk.X, pady=10)
-            
-            master_clock_button = ttk.Button(top_controls_frame, text="View Master Clock", command=self.show_master_clock_window)
-            master_clock_button.pack(side=tk.LEFT, padx=20)
-            
-            # A PanedWindow to split clocks from the legend
-            dashboard_paned_window = ttk.Panedwindow(main_container, orient=tk.HORIZONTAL)
-            dashboard_paned_window.pack(fill=tk.BOTH, expand=True)
-
-            # Left side: The clock grid
-            clock_grid_container = ttk.Frame(dashboard_paned_window)
-            dashboard_paned_window.add(clock_grid_container, weight=4)
-
-            # Right side: The legend
-            legend_container_frame = ttk.Frame(dashboard_paned_window)
-            dashboard_paned_window.add(legend_container_frame, weight=1)
-            
-            years = sorted(self.df_all_posts['Datetime_UTC'].dt.year.unique())
-            
-            max_cols = 2
-            
-            num_rows = (len(years) + max_cols - 1) // max_cols
-
-            for i in range(max_cols): clock_grid_container.grid_columnconfigure(i, weight=1)
-            for i in range(num_rows): clock_grid_container.grid_rowconfigure(i, weight=1)
-
-            for i, year in enumerate(years):
-                row, col = i // max_cols, i % max_cols
-                year_frame = ttk.Frame(clock_grid_container)
-                year_frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
-                
-                ttk.Label(year_frame, text=str(year), font=("Arial", 14, "bold")).pack(pady=(5,0))
-                df_year = self.df_all_posts[self.df_all_posts['Datetime_UTC'].dt.year == year].copy()
-                clock = QClock(year_frame, self.root, self, self.style, data=df_year)
-                self.clock_instances.append(clock)
-            
-            # --- MODIFIED: Single-column legend ---
-            legend_frame = ttk.Labelframe(legend_container_frame, text="Legend", padding=10)
-            legend_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-            def create_legend_item(parent, color, text):
-                item_frame = ttk.Frame(parent)
-                box = tk.Frame(item_frame, bg=color, width=12, height=12, relief=tk.SOLID, borderwidth=1)
-                box.pack(side=tk.LEFT, padx=(5, 5))
-                label = ttk.Label(item_frame, text=text)
-                label.pack(side=tk.LEFT, padx=(0, 10))
-                # All items will be packed directly into the main legend_frame
-                item_frame.pack(anchor="w", pady=4, padx=5)
-
-            # Dot Color Legend first
-            create_legend_item(legend_frame, "magenta", "Image + Link")
-            create_legend_item(legend_frame, "turquoise", "Post w/ Image")
-            create_legend_item(legend_frame, "orange", "Post w/ Link")
-            create_legend_item(legend_frame, "blue", "Text-Only Post")
-            
-            ttk.Separator(legend_frame, orient='horizontal').pack(fill='x', pady=8, padx=5)
-
-            # Line/Selection Legend
-            create_legend_item(legend_frame, "red", "Time Delta")
-            create_legend_item(legend_frame, "cyan", "Time Mirror")
-            create_legend_item(legend_frame, "yellow", "Post # Mirror")
-            create_legend_item(legend_frame, "green", "Date Mirror")
-            create_legend_item(legend_frame, "purple", "Multi-Select")
-            # --- END MODIFICATION ---
-
-            self.clocks_initialized = True
+        top_controls_frame = ttk.Frame(main_container)
+        top_controls_frame.pack(fill=tk.X, pady=10)
         
-        self.multi_clock_frame.pack(fill=tk.BOTH, expand=True)
-        self.clock_toggle_button.config(text="List View")
-# --- END toggle_clock_view ---
+        master_clock_button = ttk.Button(top_controls_frame, text="View Master Clock", command=self.show_master_clock_window)
+        master_clock_button.pack(side=tk.LEFT, padx=20)
+        
+        # A PanedWindow to split clocks from the legend
+        dashboard_paned_window = ttk.Panedwindow(main_container, orient=tk.HORIZONTAL)
+        dashboard_paned_window.pack(fill=tk.BOTH, expand=True)
+
+        # Left side: The clock grid
+        clock_grid_container = ttk.Frame(dashboard_paned_window)
+        dashboard_paned_window.add(clock_grid_container, weight=4)
+
+        # Right side: The legend
+        legend_container_frame = ttk.Frame(dashboard_paned_window)
+        dashboard_paned_window.add(legend_container_frame, weight=1)
+        
+        years = sorted(self.df_all_posts['Datetime_UTC'].dt.year.unique())
+        max_cols = 2
+        num_rows = (len(years) + max_cols - 1) // max_cols
+
+        for i in range(max_cols): clock_grid_container.grid_columnconfigure(i, weight=1)
+        for i in range(num_rows): clock_grid_container.grid_rowconfigure(i, weight=1)
+
+        for i, year in enumerate(years):
+            row, col = i // max_cols, i % max_cols
+            year_frame = ttk.Frame(clock_grid_container)
+            year_frame.grid(row=row, column=col, padx=5, pady=5, sticky="nsew")
+            
+            ttk.Label(year_frame, text=str(year), font=("Arial", 14, "bold")).pack(pady=(5,0))
+            df_year = self.df_all_posts[self.df_all_posts['Datetime_UTC'].dt.year == year].copy()
+            clock = QClock(year_frame, self.root, self, self.style, data=df_year)
+            self.clock_instances.append(clock)
+        
+        # The legend panel
+        legend_frame = ttk.Labelframe(legend_container_frame, text="Legend", padding=10)
+        legend_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        def create_legend_item(parent, color, text):
+            item_frame = ttk.Frame(parent)
+            box = tk.Frame(item_frame, bg=color, width=12, height=12, relief=tk.SOLID, borderwidth=1)
+            box.pack(side=tk.LEFT, padx=(5, 5))
+            label = ttk.Label(item_frame, text=text)
+            label.pack(side=tk.LEFT, padx=(0, 10))
+            item_frame.pack(anchor="w", pady=4, padx=5)
+
+        create_legend_item(legend_frame, "magenta", "Image + Link")
+        create_legend_item(legend_frame, "turquoise", "Post w/ Image")
+        create_legend_item(legend_frame, "orange", "Post w/ Link")
+        create_legend_item(legend_frame, "blue", "Text-Only Post")
+        ttk.Separator(legend_frame, orient='horizontal').pack(fill='x', pady=8, padx=5)
+        create_legend_item(legend_frame, "red", "Time Delta")
+        create_legend_item(legend_frame, "cyan", "Time Mirror")
+        create_legend_item(legend_frame, "yellow", "Post # Mirror")
+        create_legend_item(legend_frame, "green", "Date Mirror")
+        create_legend_item(legend_frame, "purple", "Multi-Select")
+
+        self.clocks_initialized = True
+# --- END build_clock_view ---
 
 # --- START _PREVENT_TEXT_EDIT ---
     def _prevent_text_edit(self, event):
@@ -1213,13 +1489,12 @@ class QPostViewer:
 
 # --- START UPDATE_DISPLAY ---
     def update_display(self):
-        for widget in self.image_display_frame.winfo_children(): widget.destroy()
+        for widget in self.image_scrollable_frame.winfo_children(): widget.destroy()
         self.displayed_images_references = []; self._quote_image_references = []; self.current_post_urls = []; self.current_post_downloaded_article_path = None
-        self.post_text_area.config(state=tk.NORMAL); 
+        self.post_text_area.config(state=tk.NORMAL)
         self.post_text_area.delete(1.0, tk.END)
         self.post_text_area.tag_remove("search_highlight_tag", "1.0", tk.END)
         
-        show_images = True
         if self.df_displayed is None or self.df_displayed.empty or not (0 <= self.current_display_idx < len(self.df_displayed)):
             self.show_welcome_message(); return
         
@@ -1238,7 +1513,6 @@ class QPostViewer:
             dt_utc = dt_val.tz_localize('UTC') if dt_val.tzinfo is None else dt_val; dt_local = dt_utc.tz_convert(None)
             date_local_str=f"{dt_local.strftime('%Y-%m-%d %H:%M:%S %Z')} (Local)\n"; date_utc_str=f"{dt_utc.strftime('%Y-%m-%d %H:%M:%S %Z')} (UTC)\n"
             self.post_text_area.insert(tk.END, "Date: ", "bold_label"); self.post_text_area.insert(tk.END, date_local_str, "date_val"); self.post_text_area.insert(tk.END, "      ", "bold_label"); self.post_text_area.insert(tk.END, date_utc_str, "date_val")
-        else: self.post_text_area.insert(tk.END, "Date: No Date\n", "bold_label")
         
         author_text_raw=post.get('Author',''); tripcode_text_raw=post.get('Tripcode',''); author_text=utils.sanitize_text_for_tkinter(author_text_raw); tripcode_text=utils.sanitize_text_for_tkinter(tripcode_text_raw)
         if author_text and pd.notna(author_text_raw): self.post_text_area.insert(tk.END, "Author: ", "bold_label"); self.post_text_area.insert(tk.END, f"{author_text}\n", "author_val")
@@ -1250,129 +1524,117 @@ class QPostViewer:
         referenced_posts_raw_data = post.get('Referenced Posts Raw')
         if isinstance(referenced_posts_raw_data, list) and referenced_posts_raw_data:
             self.post_text_area.insert(tk.END, "\nReferenced Content:\n", ("bold_label"))
-            for ref_idx, ref_post_data in enumerate(referenced_posts_raw_data):
-                if not isinstance(ref_post_data, dict): continue
-                ref_num_raw = ref_post_data.get('reference', ''); ref_author_id_raw = ref_post_data.get('author_id'); ref_text_content_raw = ref_post_data.get('text', '[No text in reference]')
-                ref_num_san = utils.sanitize_text_for_tkinter(str(ref_num_raw)); ref_auth_id_san = utils.sanitize_text_for_tkinter(str(ref_author_id_raw))
+            for ref_idx, ref_data in enumerate(referenced_posts_raw_data):
+                if not isinstance(ref_data, dict): continue
+
+                ref_id_str_for_display = ref_data.get('referenceID', '')
+
+                quoted_post_num = None
+                if isinstance(ref_id_str_for_display, str) and '>>' in ref_id_str_for_display:
+                    try:
+                        num_match = re.search(r'>>(\d+)', ref_id_str_for_display)
+                        if num_match:
+                            quoted_post_num = int(num_match.group(1))
+                    except (ValueError, TypeError):
+                        quoted_post_num = None
+
+                ref_text_content_raw = '[Quoted post data not found]'
+                quoted_images_list = []
+                author_text = 'Unknown'
+
+                if pd.notna(quoted_post_num):
+                    target_post_num_for_ref = int(quoted_post_num)
+                    quoted_post_series = self.df_all_posts[self.df_all_posts['Post Number'] == target_post_num_for_ref]
+                    
+                    if not quoted_post_series.empty:
+                        quoted_post = quoted_post_series.iloc[0]
+                        ref_text_content_raw = quoted_post.get('Text', '[Text not available in quoted post]')
+                        quoted_images_list = quoted_post.get('ImagesJSON', [])
+                        author_text = quoted_post.get('Author', 'Unknown')
+                    else:
+                        # --- THIS IS THE FIX ---
+                        # If the post isn't found, use the fallback text from the reference data itself.
+                        ref_text_content_raw = ref_data.get('textContent', f'[Post #{target_post_num_for_ref} not found, no fallback text.]')
+                        author_text = ref_data.get('referencedPostAuthorID', 'Unknown')
+                        quoted_images_list = ref_data.get('images', [])
+                else:
+                    ref_text_content_raw = ref_data.get('textContent', '[Could not find valid text content in reference data]')
+                    author_text = ref_data.get('referencedPostAuthorID', 'Unknown')
+                    quoted_images_list = ref_data.get('images', [])
                 
+                ref_num_san = utils.sanitize_text_for_tkinter(str(ref_id_str_for_display))
                 self.post_text_area.insert(tk.END, "↪ Quoting ", ("quoted_ref_header"))
-                clickable_ref_id_tag = f"clickable_ref_id_{original_df_index}_{ref_idx}_{ref_num_raw}"
-                target_post_num_for_ref = None 
-                if ref_num_san: 
+                clickable_ref_id_tag = f"clickable_ref_id_{original_df_index}_{ref_idx}_{ref_id_str_for_display}"
+                if ref_num_san:
                     self.post_text_area.insert(tk.END, f"{ref_num_san} ", ("quoted_ref_header", "clickable_link_style", clickable_ref_id_tag))
-                    try: 
-                        actual_post_num_match = re.search(r'\d+', ref_num_raw)
-                        if actual_post_num_match: 
-                            target_post_num_for_ref = int(actual_post_num_match.group(0))
-                            self.post_text_area.tag_bind(clickable_ref_id_tag, "<Button-1>", lambda e, pn=target_post_num_for_ref: self.jump_to_post_number_from_ref(pn))
-                    except ValueError: pass 
-                
-                if ref_auth_id_san and str(ref_auth_id_san).strip(): self.post_text_area.insert(tk.END, f"(by {ref_auth_id_san})", ("quoted_ref_header"))
-                self.post_text_area.insert(tk.END, ":\n", ("quoted_ref_header"))
-                
-                quoted_images_list = ref_post_data.get('images', [])
+                    if pd.notna(quoted_post_num):
+                        self.post_text_area.tag_bind(clickable_ref_id_tag, "<Button-1>", lambda e, pn=int(quoted_post_num): self.jump_to_post_number_from_ref(pn))
+                self.post_text_area.insert(tk.END, f"(by {author_text}):\n", ("quoted_ref_header"))
+
                 if quoted_images_list and isinstance(quoted_images_list, list):
                     self.post_text_area.insert(tk.END, "    ", ("quoted_ref_text_body"))
-
                     for q_img_idx, quote_img_data in enumerate(quoted_images_list):
-                        img_filename_from_quote = quote_img_data.get('file')
+                        img_filename_from_quote = quote_img_data.get('filename')
                         if img_filename_from_quote:
                             local_image_path_from_quote = os.path.join(config.IMAGE_DIR, utils.sanitize_filename_component(os.path.basename(img_filename_from_quote)))
-                            
                             if os.path.exists(local_image_path_from_quote):
                                 try:
                                     img_pil_quote = Image.open(local_image_path_from_quote)
                                     img_pil_quote.thumbnail((75, 75))
                                     photo_quote = ImageTk.PhotoImage(img_pil_quote)
                                     self._quote_image_references.append(photo_quote)
-                                    
                                     clickable_quote_img_tag = f"quote_img_open_{original_df_index}_{ref_idx}_{q_img_idx}"
-                                    
-# Insert the thumbnail image
                                     self.post_text_area.image_create(tk.END, image=photo_quote)
-# Insert a clickable link icon (chain) next to it
                                     self.post_text_area.insert(tk.END, " 🔗", ('clickable_link_style', clickable_quote_img_tag))
-# Bind the click event to open the full image
-                                    self.post_text_area.tag_bind(
-                                        clickable_quote_img_tag, 
-                                        "<Button-1>", 
-                                        lambda e, p=local_image_path_from_quote: utils.open_image_external(p, self.root)
-                                    )
-                                    if q_img_idx < len(quoted_images_list) - 1:
-                                        self.post_text_area.insert(tk.END, "  ")
-                                except Exception as e_quote_img:
-                                    print(f"Error displaying inline quote img {img_filename_from_quote}: {e_quote_img}")
-                                    self.post_text_area.insert(tk.END, f"[ErrImg]", ("quoted_ref_text_body", "image_val"))
-                                    if q_img_idx < len(quoted_images_list) - 1:
-                                        self.post_text_area.insert(tk.END, " ")
-                            else: 
-                                self.post_text_area.insert(tk.END, f"[ImgN/F]", ("quoted_ref_text_body", "image_val"))
-                                if q_img_idx < len(quoted_images_list) - 1:
-                                    self.post_text_area.insert(tk.END, " ")
-                    
-                    self.post_text_area.insert(tk.END, "\n", ("quoted_ref_text_body"))
-
-# --- MODIFIED: Use the new helper to insert text with abbreviations and URLs ---
-                self._insert_text_with_abbreviations_and_urls(self.post_text_area, ref_text_content_raw, ("quoted_ref_text_body",), f"qref_{original_df_index}_{ref_idx}")
+                                    self.post_text_area.tag_bind(clickable_quote_img_tag, "<Button-1>", lambda e, p=local_image_path_from_quote: utils.open_image_external(p, self.root))
+                                    if q_img_idx < len(quoted_images_list) - 1: self.post_text_area.insert(tk.END, "  ")
+                                except Exception as e_quote_img: print(f"Error displaying inline quote img {img_filename_from_quote}: {e_quote_img}")
+                    self.post_text_area.insert(tk.END, "\n")
                 
+                self._insert_text_with_abbreviations_and_urls(self.post_text_area, ref_text_content_raw, ("quoted_ref_text_body",), f"qref_{original_df_index}_{ref_idx}")
                 self.post_text_area.insert(tk.END, "\n")
             self.post_text_area.insert(tk.END, "\n")
-        
-# --- MODIFIED: Use the new helper to insert main text with abbreviations and URLs ---
+
         main_text_content_raw = post.get('Text', '')
         self.post_text_area.insert(tk.END, "Post Text:\n", ("bold_label"))
         self._insert_text_with_abbreviations_and_urls(self.post_text_area, main_text_content_raw, (), f"main_{original_df_index}")
+
         if self.current_search_active:
             search_keyword = self.keyword_entry.get().strip().lower()
             if search_keyword and search_keyword != config.PLACEHOLDER_KEYWORD.lower():
                 start_pos = "1.0"
                 while True:
                     start_pos = self.post_text_area.search(search_keyword, start_pos, stopindex=tk.END, nocase=True)
-                    if not start_pos:
-                        break
+                    if not start_pos: break
                     end_pos = f"{start_pos}+{len(search_keyword)}c"
                     self.post_text_area.tag_add("search_highlight_tag", start_pos, end_pos)
                     start_pos = end_pos
-        if show_images:
-            images_json_data = post.get('ImagesJSON', [])
-            if images_json_data and isinstance(images_json_data, list) and len(images_json_data) > 0:
-                self.post_text_area.insert(tk.END, f"\n\n--- Images ({len(images_json_data)}) ---\n", "bold_label")
-                for img_data in images_json_data:
-                    img_filename = img_data.get('file')
-                    if img_filename:
-                        local_image_path = os.path.join(config.IMAGE_DIR, utils.sanitize_filename_component(os.path.basename(img_filename)))
-
-                        if os.path.exists(local_image_path):
-                            try:                              
-                                img_pil = Image.open(local_image_path)
-                                img_pil.thumbnail((300, 300))
-                                photo = ImageTk.PhotoImage(img_pil)
-                                img_label = ttk.Label(self.image_display_frame, image=photo, cursor="hand2")
-                                img_label.image = photo
-                                img_label.pack(pady=2, anchor='nw')
-                                img_label.bind("<Button-1>", lambda e, p=local_image_path: utils.open_image_external(p, self.root))
-                                self.displayed_images_references.append(photo)
-                            except Exception as e:            
-                                print(f"Err display img {local_image_path}: {e}")
-                                self.post_text_area.insert(tk.END, f"[Err display img: {img_filename}]\n", "image_val")
-                        else:                             
-                            self.post_text_area.insert(tk.END, f"[Img not found: {img_filename}]\n", "image_val")
-            else: 
-                img_count_from_data = post.get('Image Count', 0)
-                if img_count_from_data == 0 : 
-                    self.post_text_area.insert(tk.END, "\n\nImage Count: 0\n", "image_val")
-                else: 
-                    self.post_text_area.insert(tk.END, f"\n\n--- Images ({img_count_from_data}) - metadata mismatch or files not found ---\n", "image_val")
-            
-            metadata_link_raw = post.get('Link')
-            if metadata_link_raw and pd.notna(metadata_link_raw) and len(str(metadata_link_raw).strip()) > 0 :
-                actual_metadata_link_str = utils.sanitize_text_for_tkinter(str(metadata_link_raw).strip())
-                # --- MODIFIED: Use the new helper for source link too ---
-                self.post_text_area.insert(tk.END, "\nSource Link: ", "bold_label")
-                self._insert_text_with_abbreviations_and_urls(self.post_text_area, actual_metadata_link_str, ("clickable_link_style",) , f"metalink_{original_df_index}")
-                self.post_text_area.insert(tk.END, "\n")
-            elif post.get('Site') and post.get('Board'): site_text=utils.sanitize_text_for_tkinter(post.get('Site','')); board_text=utils.sanitize_text_for_tkinter(post.get('Board','')); self.post_text_area.insert(tk.END, "\nSource: ", "bold_label"); self.post_text_area.insert(tk.END, f"{site_text}/{board_text}\n", "author_val")
         
+        images_json_data = post.get('ImagesJSON', [])
+        if images_json_data and isinstance(images_json_data, list) and len(images_json_data) > 0:
+            for img_data in images_json_data:
+                img_filename = img_data.get('filename')
+                if img_filename:
+                    local_image_path = os.path.join(config.IMAGE_DIR, utils.sanitize_filename_component(os.path.basename(img_filename)))
+                    if os.path.exists(local_image_path):
+                        try:
+                            img_pil = Image.open(local_image_path)
+                            img_pil.thumbnail((300, 300))
+                            photo = ImageTk.PhotoImage(img_pil)
+                            img_label = ttk.Label(self.image_scrollable_frame, image=photo, cursor="hand2")
+                            img_label.image = photo
+                            img_label.pack(pady=2, anchor='nw')
+                            img_label.bind("<Button-1>", lambda e, p=local_image_path: utils.open_image_external(p, self.root))
+                            self.displayed_images_references.append(photo)
+                        except Exception as e:
+                            print(f"Err display img {local_image_path}: {e}")
+        
+        metadata_link_raw = post.get('Link')
+        if metadata_link_raw and pd.notna(metadata_link_raw) and str(metadata_link_raw).strip():
+            self.post_text_area.insert(tk.END, "\nSource Link: ", "bold_label")
+            self._insert_text_with_abbreviations_and_urls(self.post_text_area, str(metadata_link_raw).strip(), ("clickable_link_style",) , f"metalink_{original_df_index}")
+            self.post_text_area.insert(tk.END, "\n")
+
         article_found_path = None; urls_to_scan_for_articles = []
         if metadata_link_raw and isinstance(metadata_link_raw, str) and metadata_link_raw.strip(): urls_to_scan_for_articles.append(metadata_link_raw.strip())
         if main_text_content_raw: urls_to_scan_for_articles.extend(utils._extract_urls_from_text(main_text_content_raw))
@@ -1382,7 +1644,6 @@ class QPostViewer:
             if utils.is_excluded_domain(url, config.EXCLUDED_LINK_DOMAINS): continue
             exists, filepath = utils.check_article_exists_util(safe_filename_post_id, url)
             if exists: article_found_path = filepath; break
-        
         if hasattr(self,'view_article_button'):
             if article_found_path: self.view_article_button.config(text="View Saved Article", state=tk.NORMAL, command=lambda p=article_found_path: self.open_downloaded_article(p))
             else: self.view_article_button.config(text="Article Not Saved", state=tk.DISABLED, command=lambda: None)
@@ -1392,9 +1653,8 @@ class QPostViewer:
         if hasattr(self,'view_edit_note_button'):
             if self.df_displayed is not None and not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed): self.view_edit_note_button.config(state=tk.NORMAL)
             else: self.view_edit_note_button.config(state=tk.DISABLED)
-        self._update_context_button_state()    
-        
-        # Check if the image frame is still in the panedwindow's list of panes
+        self._update_context_button_state()
+
         if self.image_display_frame in self.text_image_paned_window.panes():
             if not self.image_scrollable_frame.winfo_children():
                 self.text_image_paned_window.pane(self.image_display_frame, weight=0, width=0)
@@ -1407,6 +1667,7 @@ class QPostViewer:
         self.post_text_area.config(state=tk.DISABLED)
         self.update_post_number_label(); self.update_bookmark_button_status()
         self.root.update_idletasks()
+
 # --- END UPDATE_DISPLAY ---
 
 # --- START SHOW_WELCOME_MESSAGE ---
@@ -1832,6 +2093,17 @@ class QPostViewer:
 
 # --- START DATE_SEARCH_LOGIC ---
 
+# --- START _perform_calendar_search ---    
+    def _perform_calendar_search(self):
+        """Gets the date from the calendar and triggers a search."""
+        if hasattr(self, 'cal') and self.cal.winfo_exists():
+            selected_date_str = self.cal.get_date()
+            all_years = self.all_years_var.get()
+            self._search_by_date_str(selected_date_str, all_years=all_years)
+            # Close the calendar window after the search is performed
+            self.cal_win.destroy()
+# --- END _perform_calendar_search ---
+
 # --- START show_calendar ---
     def show_calendar(self):
         if hasattr(self, 'cal_win') and self.cal_win.winfo_exists():
@@ -1846,56 +2118,93 @@ class QPostViewer:
         self.cal_win = tk.Toplevel(self.root)
         self.cal_win.title("Select Date")
         self.cal_win.configure(bg=dialog_bg)
-        self.cal_win.geometry("300x300")
+        self.cal_win.geometry("400x450")
 
-        now = datetime.datetime.now()
-        cal_y, cal_m, cal_d = now.year, now.month, now.day
+        # --- MODIFIED: Set the initial date for the calendar ---
+        if self.calendar_first_open:
+            # On the very first open, default to Nov 2017
+            cal_y, cal_m, cal_d = 2017, 11, 1
+            self.calendar_first_open = False # Only do this once per session
+        else:
+            # For subsequent opens, default to the most recent post date
+            if hasattr(self, 'max_post_date'):
+                default_date = self.max_post_date
+            else: 
+                default_date = datetime.datetime.now()
+            
+            cal_y, cal_m, cal_d = default_date.year, default_date.month, default_date.day
 
-        if self.df_displayed is not None and not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed):
-            cur_post_dt = self.df_displayed.iloc[self.current_display_idx].get('Datetime_UTC')
-            if pd.notna(cur_post_dt):
-                cal_y, cal_m, cal_d = cur_post_dt.year, cur_post_dt.month, cur_post_dt.day
+            # And always override with the currently viewed post's date if available
+            if self.df_displayed is not None and not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed):
+                cur_post_dt = self.df_displayed.iloc[self.current_display_idx].get('Datetime_UTC')
+                if pd.notna(cur_post_dt):
+                    cal_y, cal_m, cal_d = cur_post_dt.year, cur_post_dt.month, cur_post_dt.day
         
-        cal_fg = "#000000" if self.current_theme == "light" else "#e0e0e0"
-        cal_bg = "#ffffff" if self.current_theme == "light" else "#3c3f41"
+        cal_fg_theme = "#000000" if self.current_theme == "light" else "#e0e0e0"
+        cal_bg_theme = "#ffffff" if self.current_theme == "light" else "#3c3f41"
         cal_sel_bg = "#0078D7"
         cal_sel_fg = "#ffffff"
         cal_hdr_bg = "#e1e1e1" if self.current_theme == "light" else "#4a4a4a"
         cal_dis_bg = "#f0f0f0" if self.current_theme == "light" else "#2b2b2b"
         cal_dis_fg = "grey"
+        event_highlight_bg = "#5f9ea0"
+        event_highlight_fg = "#ffffff"
 
         self.cal = Calendar(self.cal_win, selectmode="day", year=cal_y, month=cal_m, day=cal_d,
                        date_pattern='m/d/yy', font="Arial 9",
-                       background=cal_hdr_bg, foreground=cal_fg,
-                       headersbackground=cal_hdr_bg, headersforeground=cal_fg,
-                       normalbackground=cal_bg, weekendbackground=cal_bg,
-                       normalforeground=cal_fg, weekendforeground=cal_fg,
+                       mindate=getattr(self, 'min_post_date', None),
+                       maxdate=getattr(self, 'max_post_date', None),
+                       showothermonth=False,
+                       showweeknumbers=False,
+                       background=cal_hdr_bg, foreground=cal_fg_theme,
+                       headersbackground=cal_hdr_bg, headersforeground=cal_fg_theme,
+                       normalbackground=cal_bg_theme, weekendbackground=cal_bg_theme,
+                       normalforeground=cal_fg_theme, weekendforeground=cal_fg_theme,
                        othermonthbackground=cal_dis_bg, othermonthwebackground=cal_dis_bg,
                        othermonthforeground=cal_dis_fg, othermonthweforeground=cal_dis_fg,
                        selectbackground=cal_sel_bg, selectforeground=cal_sel_fg,
                        bordercolor=cal_hdr_bg)
-        self.cal.pack(padx=10, pady=(5,0))
+        
+        self.cal.tag_config('has_posts', background=event_highlight_bg, foreground=event_highlight_fg)
+        
+        if hasattr(self, 'dates_with_posts'):
+            for date_event in self.dates_with_posts:
+                self.cal.calevent_create(date_event, 'Post Day', 'has_posts')
+        
+        self.cal.pack(padx=10, pady=(10,5), fill="x")
+
+        info_frame = ttk.Frame(self.cal_win, height=100)
+        info_frame.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
+        self.cal_info_label = ttk.Label(info_frame, text="Click a day to see post numbers.",
+                                        wraplength=380, justify=tk.LEFT, anchor="nw")
+        self.cal_info_label.pack(fill=tk.BOTH, expand=True)
 
         self.all_years_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(self.cal_win, text="Search All Years (Delta)", variable=self.all_years_var).pack(pady=(5, 0))
+        ttk.Checkbutton(self.cal_win, text="Search All Years (Delta)", variable=self.all_years_var).pack(pady=(0, 5))
         
-        def on_date_select(event):
+        def on_date_select_for_info(event=None):
             selected_date_str = self.cal.get_date()
-            all_years = self.all_years_var.get()
-            self._search_by_date_str(selected_date_str, all_years=all_years)
+            selected_date_obj = pd.to_datetime(selected_date_str, format='%m/%d/%y')
+            
+            posts_on_day = self.date_to_posts_map.get(selected_date_obj, [])
+            if posts_on_day:
+                posts_by_year = {}
+                for post_num, year in posts_on_day:
+                    if year not in posts_by_year:
+                        posts_by_year[year] = []
+                    posts_by_year[year].append(str(post_num))
+                
+                info_text = f"Posts on {selected_date_obj.strftime('%b %d')}:\n"
+                for year in sorted(posts_by_year.keys()):
+                    info_text += f"  {year}: #" + ", #".join(posts_by_year[year]) + "\n"
+                self.cal_info_label.config(text=info_text.strip())
+            else:
+                self.cal_info_label.config(text=f"No posts on {selected_date_obj.strftime('%Y-%m-%d')}.")
 
-        self.cal.bind("<<CalendarSelected>>", on_date_select)
+        self.cal.bind("<<CalendarSelected>>", on_date_select_for_info)
+        self.cal.after(100, on_date_select_for_info)
 
-        # Navigation buttons for day-by-day
-        nav_frame = ttk.Frame(self.cal_win)
-        nav_frame.pack(pady=5, fill=tk.X)
-        ttk.Button(nav_frame, text="<< Prev Day", command=self.cal.prev_day).pack(side=tk.LEFT, expand=True)
-        ttk.Button(nav_frame, text="Next Day >>", command=self.cal.next_day).pack(side=tk.RIGHT, expand=True)
-
-        ttk.Button(self.cal_win, text="Go", command=on_date_select).pack(pady=(0, 10))
-        
-        # We need to re-bind the <<CalendarSelected>> event to the new on_date_select method
-        self.cal.bind("<<CalendarSelected>>", on_date_select)
+        ttk.Button(self.cal_win, text="Show Posts", command=self._perform_calendar_search).pack(pady=(0, 10))
 # --- END show_calendar ---
 
 # --- START _search_by_date_str ---
@@ -2035,82 +2344,87 @@ class QPostViewer:
             select_bg = "#0078D7"
             select_fg = "#ffffff"
 
-        theme_dialog = tk.Toplevel(self.root)
-        theme_dialog.title("Select Themes to Search")
-        theme_dialog.configure(bg=dialog_bg)
-        theme_dialog.geometry("400x450")
-        theme_dialog.transient(self.root)
-        theme_dialog.grab_set()
+        self.theme_dialog = tk.Toplevel(self.root)
+        self.theme_dialog.title("Select Themes to Search")
+        self.theme_dialog.configure(bg=dialog_bg)
+        self.theme_dialog.geometry("400x450")
+        self.theme_dialog.transient(self.root)
+        self.theme_dialog.grab_set()
 
-        main_frame = ttk.Frame(theme_dialog, padding="10")
+        main_frame = ttk.Frame(self.theme_dialog, padding="10")
         main_frame.pack(expand=True, fill=tk.BOTH)
 
-        # Instructions Label
         ttk.Label(main_frame, text="Select one or more themes:", wraplength=350).pack(pady=(0, 5), anchor="w")
 
-        # Listbox for themes
         listbox_frame = ttk.Frame(main_frame)
         listbox_frame.pack(expand=True, fill=tk.BOTH, pady=(5, 10))
 
-        theme_listbox = tk.Listbox(listbox_frame, selectmode=tk.MULTIPLE,
-                                   bg=listbox_bg, fg=listbox_fg,
-                                   selectbackground=select_bg, selectforeground=select_fg,
-                                   exportselection=False, # Important for multiple listboxes
-                                   font=('Arial', 10), relief=tk.SOLID, borderwidth=1)
+        self.theme_listbox = tk.Listbox(listbox_frame, selectmode=tk.MULTIPLE,
+                                       bg=listbox_bg, fg=listbox_fg,
+                                       selectbackground=select_bg, selectforeground=select_fg,
+                                       exportselection=False,
+                                       font=('Arial', 10), relief=tk.SOLID, borderwidth=1)
         
-        listbox_scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=theme_listbox.yview)
-        theme_listbox.config(yscrollcommand=listbox_scrollbar.set)
+        listbox_scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=self.theme_listbox.yview)
+        self.theme_listbox.config(yscrollcommand=listbox_scrollbar.set)
         
-        theme_listbox.pack(side="left", fill="both", expand=True)
+        self.theme_listbox.pack(side="left", fill="both", expand=True)
         listbox_scrollbar.pack(side="right", fill="y")
 
-        # Populate listbox with human-readable theme names
-        # Sort them alphabetically for consistent display
         display_theme_names = sorted([
             " ".join(word.capitalize() for word in theme_key.split('_'))
             for theme_key in config.THEMES.keys()
         ])
         for theme_name in display_theme_names:
-            theme_listbox.insert(tk.END, theme_name)
-
-        def perform_theme_search():
-            selected_display_indices = theme_listbox.curselection()
-            selected_themes_display = [theme_listbox.get(i) for i in selected_display_indices]
-            
-            if not selected_themes_display:
-                messagebox.showwarning("No Selection", "Please select at least one theme.", parent=theme_dialog)
-                return
-
-            # Convert display names back to original theme keys for searching
-            selected_theme_keys = []
-            for display_name in selected_themes_display:
-                # Find the original key by reversing the capitalization process
-                original_key = "_".join(word.lower() for word in display_name.split(' '))
-                if original_key in config.THEMES: # Sanity check
-                    selected_theme_keys.append(original_key)
-            
-            if not selected_theme_keys:
-                messagebox.showerror("Error", "Could not map selected themes to internal keys.", parent=theme_dialog)
-                return
-
-            theme_dialog.destroy() # Close the selection dialog
-
-            # Perform the actual search in the DataFrame
-            # Filter posts where the 'Themes' list contains ANY of the selected theme keys
-            results = self.df_all_posts[
-                self.df_all_posts['Themes'].apply(
-                    lambda themes: any(t_key in themes for t_key in selected_theme_keys) if isinstance(themes, list) else False
-                )
-            ]
-            
-            search_term_str = f"Themes = '{', '.join(selected_themes_display)}'"
-            self._handle_search_results(results, search_term_str)
+            self.theme_listbox.insert(tk.END, theme_name)
 
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
 
-        ttk.Button(button_frame, text="Search", command=perform_theme_search).pack(side=tk.LEFT, expand=True, padx=(0, 5))
-        ttk.Button(button_frame, text="Cancel", command=theme_dialog.destroy).pack(side=tk.LEFT, expand=True)
+        ttk.Button(button_frame, text="Search", command=self.perform_theme_search).pack(side=tk.LEFT, expand=True, padx=(0, 5))
+        ttk.Button(button_frame, text="Cancel", command=self.theme_dialog.destroy).pack(side=tk.LEFT, expand=True)
+        
+    def perform_theme_search(self):
+        """Called by the theme selection dialog to filter posts by theme."""
+        selected_display_indices = self.theme_listbox.curselection()
+        selected_themes_display = [self.theme_listbox.get(i) for i in selected_display_indices]
+        
+        if not selected_themes_display:
+            messagebox.showwarning("No Selection", "Please select at least one theme.", parent=self.theme_dialog)
+            return
+
+        selected_theme_keys = []
+        for display_name in selected_themes_display:
+            original_key = "_".join(word.lower() for word in display_name.split(' '))
+            if original_key in config.THEMES:
+                selected_theme_keys.append(original_key)
+        
+        if not selected_theme_keys:
+            messagebox.showerror("Error", "Could not map selected themes to internal keys.", parent=self.theme_dialog)
+            return
+
+        # --- THIS IS THE FIX FOR THE KEYERROR ---
+        # Check for the correct column name in the DataFrame
+        theme_col_name = None
+        if 'Themes' in self.df_all_posts.columns:
+            theme_col_name = 'Themes'
+        elif 'themes' in self.df_all_posts.columns: # Check for lowercase version
+            theme_col_name = 'themes'
+        else:
+            messagebox.showerror("Error", "Theme column not found in post data. Expected 'Themes' or 'themes'.", parent=self.theme_dialog)
+            return
+        # --- END FIX ---
+
+        self.theme_dialog.destroy()
+
+        results = self.df_all_posts[
+            self.df_all_posts[theme_col_name].apply(
+                lambda themes: any(t_key in themes for t_key in selected_theme_keys) if isinstance(themes, list) else False
+            )
+        ]
+        
+        search_term_str = f"Themes = '{', '.join(selected_themes_display)}'"
+        self._handle_search_results(results, search_term_str)    
 
 # --- END THEME_SEARCH_LOGIC ---
 
@@ -3275,14 +3589,10 @@ class QPostViewer:
     def set_initial_sash_position(self):
         """Sets the initial position of the sash after the window is drawn."""
         try:
-            # Set the image pane to be a fixed width initially
-            initial_image_pane_width = 300
-            new_sash_pos = self.details_outer_frame.winfo_width() - initial_image_pane_width
-            
-            if new_sash_pos > 0:
-                self.text_image_paned_window.sashpos(0, new_sash_pos)
+            # Set the divider to be 500 pixels from the left
+            self.text_image_paned_window.sashpos(0, 500)
         except tk.TclError:
-            # Window may not be visible yet, just ignore.
+            # This handles cases where the window isn't ready yet
             pass
 
     def _check_sash_position(self, event):
@@ -3562,6 +3872,59 @@ class QPostViewer:
 
 # --- END REPOPULATE_TREEVIEW ---
 
+# --- START sort_treeview_column ---
+    def sort_treeview_column(self, col, reverse):
+        """Sorts the treeview items when a column header is clicked."""
+        try:
+            # Get items as a list of tuples: (column_value, iid_as_int)
+            # The iid is the original DataFrame index, which is numeric and perfect for sorting.
+            items = []
+            for iid in self.post_tree.get_children(''):
+                try:
+                    col_value = self.post_tree.set(iid, col)
+                    iid_int = int(iid) # The iid is the original DataFrame index string
+                    items.append((col_value, iid_int))
+                except (ValueError, TypeError):
+                    continue # Skip if iid isn't a valid integer
+
+            # Define a smart sort key
+            def get_sort_key(item):
+                col_value, iid_int = item
+                
+                if col == "Post #":
+                    # For this column, the *primary* key IS the numeric value.
+                    try:
+                        if col_value.startswith('#'):
+                            primary_key = int(col_value[1:])
+                        elif col_value.startswith('Idx:'):
+                            primary_key = int(col_value[4:])
+                        else:
+                            primary_key = 0
+                    except (ValueError, TypeError):
+                        primary_key = 0
+                    return primary_key
+
+                # For ALL OTHER columns (Date, Notes, Bookmarked):
+                # Sort by the column value (e.g., "★" or "2020-10-27") first.
+                # Then, as a tie-breaker, sort by the iid_int (original numeric index).
+                return (col_value, iid_int)
+            
+            # Perform the sort using our new smart key
+            items.sort(key=get_sort_key, reverse=reverse)
+
+            # Reorder items in the treeview
+            for index, (val, iid_int) in enumerate(items):
+                self.post_tree.move(str(iid_int), '', index) # Use the string version of iid to move
+
+            # Invert the sort direction for the next click on this column
+            self.post_tree.heading(col, command=lambda: self.sort_treeview_column(col, not reverse))
+            
+        except Exception as e:
+            print(f"Error sorting treeview column '{col}': {e}")
+            # Reset the command to prevent repeated errors if sorting fails
+            self.post_tree.heading(col, command=lambda: self.sort_treeview_column(col, reverse))
+# --- END sort_treeview_column ---
+
 # --- START UPDATE_POST_NUMBER_LABEL ---
 
     def update_post_number_label(self, is_welcome=False): # Added is_welcome
@@ -3688,7 +4051,8 @@ class QPostViewer:
         self.style.configure("Contrasting.Horizontal.TProgressbar", troughcolor=progress_trough, background=progress_bar_color, thickness=20)
 
         self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
-        if hasattr(self,'image_display_frame'): self.image_display_frame.configure(style="TFrame")
+        self.style.configure("Entry.TFrame", background=entry_bg)
+        if hasattr(self, 'image_canvas'): self.image_canvas.configure(bg=entry_bg)
         if hasattr(self, 'image_canvas'): self.image_canvas.configure(bg=entry_bg)
 
 # --- MODIFICATION: Set all metadata labels to yellow for contrast ---
@@ -3743,9 +4107,13 @@ class QPostViewer:
         self.style.configure("TLabelframe.Label", background=bg, foreground=fg, font=('Arial', 10, 'bold'))
 
         self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
+
         # --- THIS IS THE FIX ---
-        if hasattr(self, 'image_canvas'):
-            self.image_canvas.configure(bg=entry_bg)
+        # Ensure all frames in the image pane are correctly styled.
+        self.style.configure("Entry.TFrame", background=entry_bg)
+        if hasattr(self, 'image_canvas'): self.image_canvas.configure(bg=entry_bg)
+        
+        # --- END FIX ---
         
         # Configure Text widget tags
         self.post_text_area.tag_configure("bold_label", foreground="#333333", font=('Arial', 11, 'bold'))
@@ -3786,8 +4154,9 @@ class QPostViewer:
         self.style.configure("Contrasting.Horizontal.TProgressbar", troughcolor=progress_trough, background=progress_bar_color, thickness=20)
         
         self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
-        if hasattr(self,'image_display_frame'): self.image_display_frame.configure(style="TFrame")
+        self.style.configure("Entry.TFrame", background=entry_bg)
         if hasattr(self, 'image_canvas'): self.image_canvas.configure(bg=entry_bg)
+        
         
 # --- MODIFICATION: Set all metadata labels to gold/yellow for contrast ---
         self.post_text_area.tag_configure("bold_label", foreground=accent_gold)
@@ -3847,7 +4216,13 @@ class QPostViewer:
         
         # Configure Text widget and Image Canvas
         self.post_text_area.configure(bg=entry_bg, fg=fg, insertbackground=fg, selectbackground=tree_sel_bg)
+
+        # --- THIS IS THE FIX ---
+        # Ensure all frames in the image pane are correctly styled.
+        self.style.configure("Entry.TFrame", background=entry_bg)
         if hasattr(self, 'image_canvas'): self.image_canvas.configure(bg=entry_bg)
+        
+        # --- END FIX ---
 
         # Apply vibrant accents to text tags
         self.post_text_area.tag_configure("bold_label", foreground=link_color)

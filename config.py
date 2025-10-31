@@ -27,7 +27,6 @@ else:
 # --- END MODIFIED APP_ROOT_DIR DEFINITION ---
 
 # Raw data file (typically shipped with the app or in a 'data' subfolder)
-# For now, assume it's at the APP_ROOT_DIR. Consider moving to APP_ROOT_DIR/data/
 POSTS_DATA_PATH = os.path.join(APP_ROOT_DIR, "data", "qview_posts_data.json")
 
 # User-specific data, downloaded content, and generated files
@@ -53,9 +52,11 @@ except OSError as e:
 
 
 DATAFRAME_PICKLE_PATH = os.path.join(USER_DATA_ROOT, "posts_df.pkl")
+INDICES_PICKLE_PATH = os.path.join(USER_DATA_ROOT, "indices_cache.pkl")
 BOOKMARKS_FILE_PATH = os.path.join(USER_DATA_ROOT, "q_gui_bookmarks.dat")
 SETTINGS_FILE_PATH = os.path.join(USER_DATA_ROOT, "settings.json")
 USER_NOTES_FILE_PATH = os.path.join(USER_DATA_ROOT, "user_notes.json")
+SYMBOLS_FILE_PATH = os.path.join(USER_DATA_ROOT, "symbols.json") # <-- THIS IS THE ADDED LINE
 QUOTES_MAP_PICKLE = os.path.join(USER_DATA_ROOT, "post_quotes_map.pkl")
 QUOTED_BY_MAP_PICKLE = os.path.join(USER_DATA_ROOT, "post_quoted_by_map.pkl")
 
