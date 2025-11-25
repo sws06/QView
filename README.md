@@ -3,26 +3,23 @@ Your Offline Q Post Research Environment
 
 QView is a standalone, offline application for Windows designed for deep research and analysis of Q posts. It operates entirely on your local machine, ensuring privacy and eliminating the need for an internet connection after the initial data download. It provides powerful search, filtering, annotation, and visualization tools to help users explore the dataset and discover connections.
 
-## Latest in v1.6 (September 2025)
+## Latest in v1.7 (November 2025)
 
-### The Q Clock: A Dynamic Visualization Dashboard
-This version introduces the **Q Clock**, a powerful suite of interactive, circular data visualization tools for deep analysis of post timing, connections, and content types.
+### Universal Calendar & Data Fidelity
+This version rebuilds the date-search experience and fixes critical export and search bugs.
 
-* **Multi-Clock Dashboard:** View each year of posts on its own interactive clock in a balanced 2x2 grid, complete with a dedicated, always-visible legend.
-* **Standalone "Master Clock":** Launch a new, resizable window featuring a chronological "spiral plot" of all posts from all years, allowing for a deep dive into the complete timeline.
-* **Advanced Interactivity:**
-    * Smooth mouse-wheel zoom and intuitive left-click-drag pan.
-    * Dynamic dot scaling keeps posts clear and readable at any zoom level.
-    * `Ctrl+Click` to multi-select posts for custom analysis.
-    * Context-aware scrolling (zoom on clock, scroll on background).
-* **Powerful Analytical Tools:**
-    * **Color-Coded Dots:** Instantly identify posts with images (turquoise), links (orange), or both (magenta).
-    * **Filter Toggles:** Dynamically show or hide posts by content type using a compact dropdown menu.
-    * **Connection Lines:** Click any post to instantly visualize its connections to other posts (Time Deltas, Mirrored Dates, Mirrored Post #s, etc.).
-    * **"Today's Date" Highlight:** A real-time slice on the clock highlights the current day of the year for effortless anniversary analysis.
-* **Data Integrity & Polish:** Includes a script to fix a common data anomaly in some JSON files where final 2020 posts were incorrectly timestamped to 2022. The entire feature is highly polished with custom themes and a professional layout.
+* **Universal "Year-at-a-Glance" Calendar:** A completely new, custom-built calendar interface replacing the standard date picker.
+    * **Silent Day Tracking:** The calendar now highlights days where **no posts were ever made** (across any year), identifying communication gaps at a glance.
+    * **Multi-Year Info Panel:** Clicking any date instantly displays a breakdown of post numbers for that specific day across all years (2017-2020).
+    * **Year-Agnostic Grid:** A streamlined 12-month view that eliminates the need to scroll through empty years.
+* **HTML Export Upgrade:** The "Export to HTML" feature now correctly preserves line breaks in post text, making long-form posts readable in the browser.
+* **Critical Bug Fixes:**
+    * **Theme Search:** Fixed a crash caused by case-sensitivity issues when filtering by themes.
+    * **List Sorting:** Fixed the sort logic so posts order numerically (1, 2, 10) instead of alphabetically (1, 10, 2).
+    * **Stability:** Fixed a crash related to date formatting in the new calendar view.
 
 ## Core Features
+* **The Q Clock:** A dynamic visualization dashboard for analyzing post timing and connections (Spiral plot, 2x2 grid, Delta mapping).
 * **Complete Offline Access:** After an initial sync, the entire application and dataset run locally.
 * **Advanced Search:** Filter the entire post archive by post number, keywords, date, and post themes.
 * **Context Chain Viewer:** Trace conversations and connections between posts.
@@ -31,6 +28,12 @@ This version introduces the **Q Clock**, a powerful suite of interactive, circul
 
 <details>
 <summary><strong>View Previous Version History...</strong></summary>
+
+### v1.6 (September 2025)
+* **The Q Clock:** Introduced the Multi-Clock Dashboard and Master Spiral Clock.
+* **Advanced Interactivity:** Zoom, pan, and dynamic dot scaling.
+* **Visual Filtering:** Color-coded dots for images/links and connection lines for Deltas/Mirrors.
+* **Data Polish:** Fixed timestamp anomalies for late 2020 posts.
 
 ### v1.5 (September 2025)
 * **Search Term Highlighting:** Search results now highlight the matching keyword in the post text.
