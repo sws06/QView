@@ -18,6 +18,7 @@ import math
 import utils
 import data as app_data
 import settings
+import calendar
 
 # --- END GUI_PY_HEADER ---
 
@@ -679,6 +680,166 @@ class QClock:
         self.canvas.delete("transient_label")
 # --- END QCLOCK_CLASS ---
 
+# --- START YEAR_CALENDAR_VIEW CLASS ---
+
+class YearCalendarView(tk.Toplevel):
+    """
+    A custom "Universal Year" calendar window.
+    Shows 12 months, highlighting any day that Q *never* posted on.
+    """
+    def __init__(self, master, gui_instance, data_maps):
+        super().__init__(master)
+        self.title("Universal Post Calendar")
+        self.gui_instance = gui_instance
+        
+        # Unpack the data maps passed from the main GUI
+        self.month_day_with_posts_set = data_maps.get("month_day_with_posts_set", set())
+        self.date_to_posts_map = data_maps.get("date_to_posts_map", {})
+        self.min_date = data_maps.get("min_post_date", datetime.date(2017, 1, 1))
+        self.max_date = data_maps.get("max_post_date", datetime.date.today())
+        
+        self.selected_month_day = None # Will store the last clicked (month, day) tuple
+        self.build_year = 2020 # Use a leap year to ensure Feb 29th has a slot
+        
+        # --- Apply Theming ---
+        try:
+            dialog_bg = self.gui_instance.style.lookup("TFrame", "background")
+            self.configure(bg=dialog_bg)
+            
+            # Define styles for calendar day buttons
+            self.style = self.gui_instance.style
+            
+            # Style for a regular day (a day Q posted on)
+            self.style.configure("Day.TButton", font=("Arial", 9, "bold"), padding=(2, 2))
+
+            # --- NEW: Style for a day Q NEVER posted on ---
+            self.no_post_bg = "#4A4A4A" if self.gui_instance.current_theme != "light" else "#E0E0E0"
+            self.no_post_fg = "#9E9E9E" if self.gui_instance.current_theme != "light" else "#A1A1A1"
+            self.style.configure("NoPostDay.TButton", font=("Arial", 9, "italic"), 
+                                 background=self.no_post_bg, 
+                                 foreground=self.no_post_fg)
+            self.style.map("NoPostDay.TButton",
+                           background=[('active', self.no_post_bg), ('pressed', self.no_post_bg)],
+                           foreground=[('active', self.no_post_fg), ('pressed', self.no_post_fg)])
+
+        except tk.TclError:
+            print("Could not apply custom styles to YearCalendarView.")
+            
+        # --- Main Layout ---
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 1. Calendar Grid Frame
+        self.calendar_grid_frame = ttk.Frame(main_frame)
+        self.calendar_grid_frame.pack(fill=tk.BOTH, expand=True)
+        for i in range(4): # 4 columns
+            self.calendar_grid_frame.grid_columnconfigure(i, weight=1, uniform="cal_col")
+        for i in range(3): # 3 rows
+            self.calendar_grid_frame.grid_rowconfigure(i, weight=1, uniform="cal_row")
+
+        # 2. Info Panel Frame
+        info_outer_frame = ttk.Labelframe(main_frame, text="Posts on Selected Date (All Years)", padding=10)
+        info_outer_frame.pack(fill=tk.X, pady=(10, 5))
+        
+        self.info_labels = {} # To hold labels for 2017, 2018, etc.
+        for year in range(self.min_date.year, self.max_date.year + 1):
+            info_row = ttk.Frame(info_outer_frame)
+            info_row.pack(fill=tk.X)
+            ttk.Label(info_row, text=f"{year}:", width=6, font=("Arial", 10, "bold")).pack(side=tk.LEFT)
+            self.info_labels[year] = ttk.Label(info_row, text="-", font=("Arial", 10), wraplength=450)
+            self.info_labels[year].pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # 3. Action Button
+        self.show_posts_btn = ttk.Button(main_frame, text="Show All Posts for Selected Date", 
+                                         command=self._on_show_posts_click, state=tk.DISABLED)
+        self.show_posts_btn.pack(pady=(10, 0), fill=tk.X)
+
+        # --- Initial Build ---
+        self.build_year_view()
+
+    def build_year_view(self):
+        """Builds the 12-month calendar grid."""
+        for month in range(1, 13):
+            display_month = (month - 1) % 12 + 1
+            
+            row = (month - 1) // 4
+            col = (month - 1) % 4
+            
+            month_frame = ttk.Frame(self.calendar_grid_frame, padding=5)
+            month_frame.grid(row=row, column=col, sticky="nsew", padx=2, pady=2)
+            
+            self._build_month_calendar(month_frame, self.build_year, display_month)
+
+    def _build_month_calendar(self, parent_frame, year, month):
+        """Builds a single month calendar grid inside the parent_frame."""
+        month_name = calendar.month_name[month]
+        ttk.Label(parent_frame, text=month_name, font=("Arial", 11, "bold"), anchor="center").pack(fill=tk.X, pady=2)
+
+        days_grid_frame = ttk.Frame(parent_frame)
+        days_grid_frame.pack(fill=tk.BOTH, expand=True)
+        
+        days_of_week = ["S", "M", "T", "W", "T", "F", "S"]
+        for i, day_name in enumerate(days_of_week):
+            days_grid_frame.grid_columnconfigure(i, weight=1, uniform="day_col")
+            ttk.Label(days_grid_frame, text=day_name, font=("Arial", 8, "bold"), anchor="center").grid(row=0, column=i, sticky="nsew")
+
+        month_weeks = calendar.monthcalendar(year, month)
+        
+        for row_idx, week in enumerate(month_weeks, start=1):
+            for col_idx, day in enumerate(week):
+                if day == 0:
+                    ttk.Frame(days_grid_frame).grid(row=row_idx, column=col_idx)
+                else:
+                    # --- MODIFIED HIGHLIGHT LOGIC ---
+                    has_posts = (month, day) in self.month_day_with_posts_set
+                    style = "Day.TButton" if has_posts else "NoPostDay.TButton"
+                    
+                    day_btn = ttk.Button(days_grid_frame, text=str(day), style=style,
+                                         command=lambda m=month, d=day: self._on_day_click(m, d))
+                    day_btn.grid(row=row_idx, column=col_idx, sticky="nsew", padx=1, pady=1)
+
+    def _on_day_click(self, month, day):
+        """Called when any day button is clicked."""
+        self.selected_month_day = (month, day)
+        self.show_posts_btn.config(state=tk.NORMAL)
+        
+        # Clear all info labels
+        for year in self.info_labels:
+            self.info_labels[year].config(text="-")
+            
+        # Get posts for this date (Month-Day) across ALL years
+        for year, label in self.info_labels.items():
+            try:
+                # We must construct a valid date to check our map
+                date_obj = datetime.date(year, month, day)
+                date_key = pd.to_datetime(date_obj)
+                
+                posts = self.date_to_posts_map.get(date_key, [])
+                if posts:
+                    post_nums = [str(p[0]) for p in posts]
+                    label.config(text="#" + ", #".join(post_nums))
+            except ValueError:
+                # This handles non-existent dates (like Feb 29 on a non-leap year)
+                continue 
+                
+    def _on_show_posts_click(self):
+        """Called by the 'Show Posts' button."""
+        if self.selected_month_day:
+            month, day = self.selected_month_day
+            
+            # --- FIX: Format the year as 2 digits to match %y format ---
+            # The search function expects 'm/d/yy' (e.g., 11/4/17)
+            # self.min_date.year is e.g. 2017, so we take the last 2 characters.
+            year_2_digit = str(self.min_date.year)[-2:]
+            
+            date_str = f"{month}/{day}/{year_2_digit}"
+            # -----------------------------------------------------------
+            
+            self.gui_instance._search_by_date_str(date_str, all_years=True)
+            self.destroy() # Close the calendar window
+            
+# --- END YEAR_CALENDAR_VIEW CLASS ---
+
 # --- START QPOSTVIEWER_CLASS_DEFINITION ---         
 class QPostViewer:
 
@@ -871,7 +1032,7 @@ class QPostViewer:
         self.search_menu_button = ttk.Menubutton(search_buttons_frame, text="Advanced Search", style="TButton")
         self.search_menu = tk.Menu(self.search_menu_button, tearoff=0)
         self.search_menu_button["menu"] = self.search_menu
-        self.search_menu.add_command(label="Search by Date", command=self.show_calendar)
+        self.search_menu.add_command(label="Search by Date", command=self.show_year_calendar_view)
         self.search_menu.add_command(label="Today's Deltas", command=self.search_today_deltas)
         self.search_menu.add_command(label="Search by Theme", command=self.show_theme_selection_dialog)
         Tooltip(self.search_menu_button, lambda: "Advanced search options.")
@@ -940,8 +1101,6 @@ class QPostViewer:
             self.repopulate_treeview(self.df_displayed, select_first_item=False)
             
             # --- NEW: Prepare data for calendar highlighting and info ---
-            # Create a set of unique dates that have posts for quick lookups
-            self.dates_with_posts = set(pd.to_datetime(self.df_all_posts['Datetime_UTC'].dt.date).unique())
             
             # Create a dictionary mapping each date to a list of its posts (Post #, Year)
             temp_df = self.df_all_posts.dropna(subset=['Datetime_UTC', 'Post Number']).copy()
@@ -949,7 +1108,13 @@ class QPostViewer:
             self.date_to_posts_map = temp_df.groupby('date_only').apply(
                 lambda x: sorted(list(set(zip(x['Post Number'].astype(int), x['Datetime_UTC'].dt.year))))
             ).to_dict()
-            # --- END NEW ---
+            
+            # --- NEW: Create a set of (month, day) tuples for universal highlighting ---
+            self.month_day_with_posts_set = set()
+            if hasattr(self, 'date_to_posts_map'):
+                for date_obj in self.date_to_posts_map.keys():
+                    # date_obj is a pandas Timestamp, use .month and .day
+                    self.month_day_with_posts_set.add((date_obj.month, date_obj.day))
             
             # --- NEW: Get the min/max dates for the calendar bounds ---
             self.min_post_date = self.df_all_posts['Datetime_UTC'].min().date()
@@ -2093,119 +2258,25 @@ class QPostViewer:
 
 # --- START DATE_SEARCH_LOGIC ---
 
-# --- START _perform_calendar_search ---    
-    def _perform_calendar_search(self):
-        """Gets the date from the calendar and triggers a search."""
-        if hasattr(self, 'cal') and self.cal.winfo_exists():
-            selected_date_str = self.cal.get_date()
-            all_years = self.all_years_var.get()
-            self._search_by_date_str(selected_date_str, all_years=all_years)
-            # Close the calendar window after the search is performed
-            self.cal_win.destroy()
-# --- END _perform_calendar_search ---
-
-# --- START show_calendar ---
-    def show_calendar(self):
+    def show_year_calendar_view(self):
+        """
+        Opens the new 'Universal Year' calendar window.
+        """
         if hasattr(self, 'cal_win') and self.cal_win.winfo_exists():
             self.cal_win.lift()
             return
+
+        # Bundle all the necessary data for the new calendar view
+        calendar_data = {
+            "month_day_with_posts_set": getattr(self, 'month_day_with_posts_set', set()),
+            "date_to_posts_map": getattr(self, 'date_to_posts_map', {}),
+            "min_post_date": getattr(self, 'min_post_date', None),
+            "max_post_date": getattr(self, 'max_post_date', None)
+        }
         
-        try:
-            dialog_bg = self.style.lookup("TFrame", "background")
-        except tk.TclError: 
-            dialog_bg = "#2b2b2b" if self.current_theme == "dark" else "#f0f0f0"
-
-        self.cal_win = tk.Toplevel(self.root)
-        self.cal_win.title("Select Date")
-        self.cal_win.configure(bg=dialog_bg)
-        self.cal_win.geometry("400x450")
-
-        # --- MODIFIED: Set the initial date for the calendar ---
-        if self.calendar_first_open:
-            # On the very first open, default to Nov 2017
-            cal_y, cal_m, cal_d = 2017, 11, 1
-            self.calendar_first_open = False # Only do this once per session
-        else:
-            # For subsequent opens, default to the most recent post date
-            if hasattr(self, 'max_post_date'):
-                default_date = self.max_post_date
-            else: 
-                default_date = datetime.datetime.now()
-            
-            cal_y, cal_m, cal_d = default_date.year, default_date.month, default_date.day
-
-            # And always override with the currently viewed post's date if available
-            if self.df_displayed is not None and not self.df_displayed.empty and 0 <= self.current_display_idx < len(self.df_displayed):
-                cur_post_dt = self.df_displayed.iloc[self.current_display_idx].get('Datetime_UTC')
-                if pd.notna(cur_post_dt):
-                    cal_y, cal_m, cal_d = cur_post_dt.year, cur_post_dt.month, cur_post_dt.day
-        
-        cal_fg_theme = "#000000" if self.current_theme == "light" else "#e0e0e0"
-        cal_bg_theme = "#ffffff" if self.current_theme == "light" else "#3c3f41"
-        cal_sel_bg = "#0078D7"
-        cal_sel_fg = "#ffffff"
-        cal_hdr_bg = "#e1e1e1" if self.current_theme == "light" else "#4a4a4a"
-        cal_dis_bg = "#f0f0f0" if self.current_theme == "light" else "#2b2b2b"
-        cal_dis_fg = "grey"
-        event_highlight_bg = "#5f9ea0"
-        event_highlight_fg = "#ffffff"
-
-        self.cal = Calendar(self.cal_win, selectmode="day", year=cal_y, month=cal_m, day=cal_d,
-                       date_pattern='m/d/yy', font="Arial 9",
-                       mindate=getattr(self, 'min_post_date', None),
-                       maxdate=getattr(self, 'max_post_date', None),
-                       showothermonth=False,
-                       showweeknumbers=False,
-                       background=cal_hdr_bg, foreground=cal_fg_theme,
-                       headersbackground=cal_hdr_bg, headersforeground=cal_fg_theme,
-                       normalbackground=cal_bg_theme, weekendbackground=cal_bg_theme,
-                       normalforeground=cal_fg_theme, weekendforeground=cal_fg_theme,
-                       othermonthbackground=cal_dis_bg, othermonthwebackground=cal_dis_bg,
-                       othermonthforeground=cal_dis_fg, othermonthweforeground=cal_dis_fg,
-                       selectbackground=cal_sel_bg, selectforeground=cal_sel_fg,
-                       bordercolor=cal_hdr_bg)
-        
-        self.cal.tag_config('has_posts', background=event_highlight_bg, foreground=event_highlight_fg)
-        
-        if hasattr(self, 'dates_with_posts'):
-            for date_event in self.dates_with_posts:
-                self.cal.calevent_create(date_event, 'Post Day', 'has_posts')
-        
-        self.cal.pack(padx=10, pady=(10,5), fill="x")
-
-        info_frame = ttk.Frame(self.cal_win, height=100)
-        info_frame.pack(padx=10, pady=5, fill=tk.BOTH, expand=True)
-        self.cal_info_label = ttk.Label(info_frame, text="Click a day to see post numbers.",
-                                        wraplength=380, justify=tk.LEFT, anchor="nw")
-        self.cal_info_label.pack(fill=tk.BOTH, expand=True)
-
-        self.all_years_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(self.cal_win, text="Search All Years (Delta)", variable=self.all_years_var).pack(pady=(0, 5))
-        
-        def on_date_select_for_info(event=None):
-            selected_date_str = self.cal.get_date()
-            selected_date_obj = pd.to_datetime(selected_date_str, format='%m/%d/%y')
-            
-            posts_on_day = self.date_to_posts_map.get(selected_date_obj, [])
-            if posts_on_day:
-                posts_by_year = {}
-                for post_num, year in posts_on_day:
-                    if year not in posts_by_year:
-                        posts_by_year[year] = []
-                    posts_by_year[year].append(str(post_num))
-                
-                info_text = f"Posts on {selected_date_obj.strftime('%b %d')}:\n"
-                for year in sorted(posts_by_year.keys()):
-                    info_text += f"  {year}: #" + ", #".join(posts_by_year[year]) + "\n"
-                self.cal_info_label.config(text=info_text.strip())
-            else:
-                self.cal_info_label.config(text=f"No posts on {selected_date_obj.strftime('%Y-%m-%d')}.")
-
-        self.cal.bind("<<CalendarSelected>>", on_date_select_for_info)
-        self.cal.after(100, on_date_select_for_info)
-
-        ttk.Button(self.cal_win, text="Show Posts", command=self._perform_calendar_search).pack(pady=(0, 10))
-# --- END show_calendar ---
+        self.cal_win = YearCalendarView(self.root, self, calendar_data)
+        self.cal_win.transient(self.root)
+        self.cal_win.grab_set()
 
 # --- START _search_by_date_str ---
     def _search_by_date_str(self, date_str_from_cal, all_years=False):
@@ -2756,17 +2827,13 @@ class QPostViewer:
 
 # --- START EXPORT_DISPLAYED_LIST ---
 
-    def export_displayed_list(self, file_format=""): # file_format arg added
+    def export_displayed_list(self, file_format=""): 
         if self.df_displayed is None or self.df_displayed.empty:
             messagebox.showwarning("Export", "No posts to export.", parent=self.root)
             return
         
-# --- MODIFIED: Use file_format from menu, or prompt if called directly without format ---
         if not file_format: 
-# If called without a specific format (e.g., old direct call)
-# This path should ideally not be hit with the new menu button
             export_format = self.export_var.get() 
-# Fallback to old OptionMenu var
         else:
             export_format = file_format
         
@@ -2778,26 +2845,24 @@ class QPostViewer:
         elif export_format == "CSV":
             file_types = [("CSV files", "*.csv"), ("All files", "*.*")]
             initial_ext = ".csv"
-        else: # Should not happen with the menu
+        else: 
             messagebox.showerror("Export Error", "Invalid export format selected.", parent=self.root)
             return
 
         final_filename = filedialog.asksaveasfilename(
             parent=self.root,
-            initialdir=os.getcwd(), # Or config.USER_DATA_ROOT for a default save location
+            initialdir=os.getcwd(), 
             title=f"Save {export_format}",
             defaultextension=initial_ext,
             filetypes=file_types,
             initialfile=default_fname
         )
 
-        if not final_filename:  # User cancelled
+        if not final_filename:
             return
         
-# Ensure df_displayed is used, not df_all_posts by mistake
         df_exp = self.df_displayed.copy()
         
-# Use only the columns defined in config.EXPORT_COLUMNS that exist in df_exp
         cols_to_use = [c for c in config.EXPORT_COLUMNS if c in df_exp.columns]
         if not cols_to_use:
             messagebox.showerror("Export Error", "No valid columns found for export. Check EXPORT_COLUMNS in config.", parent=self.root)
@@ -2808,12 +2873,10 @@ class QPostViewer:
         try:
             if final_filename.endswith(".csv"):
                 df_csv = df_for_export.copy()
-# Convert list columns to strings for CSV
                 if 'Themes' in df_csv.columns:
                     df_csv['Themes'] = df_csv['Themes'].apply(lambda x: ', '.join(x) if isinstance(x, list) else str(x))
-                if 'ImagesJSON' in df_csv.columns: # Example if you export complex data
+                if 'ImagesJSON' in df_csv.columns: 
                     df_csv['ImagesJSON'] = df_csv['ImagesJSON'].apply(lambda x: str(x) if isinstance(x, list) else "")
-# Ensure Referenced Posts Display is string
                 if 'Referenced Posts Display' in df_csv.columns:
                     df_csv['Referenced Posts Display'] = df_csv['Referenced Posts Display'].astype(str)
 
@@ -2821,16 +2884,21 @@ class QPostViewer:
                 messagebox.showinfo("Success", f"Exported {len(df_for_export)} posts to {final_filename}", parent=self.root)
             
             elif final_filename.endswith(".html"):
-                import html # Ensure html module is available
+                import html
                 df_html = df_for_export.copy()
                 
-# Apply HTML formatting for specific columns
                 if 'Link' in df_html.columns:
                     df_html['Link'] = df_html['Link'].apply(
                         lambda x: f'<a href="{html.escape(x, quote=True)}" target="_blank">{html.escape(x)}</a>' if pd.notna(x) and x else ""
                     )
+                
+                # --- THIS IS THE FIX ---
                 if 'Text' in df_html.columns:
-                    df_html['Text'] = df_html['Text'].apply(utils.format_cell_text_for_gui_html) # Assumes this util handles HTML line breaks
+                    # First, apply the HTML escaper (which is what format_cell_text_for_gui_html does)
+                    df_html['Text'] = df_html['Text'].apply(utils.format_cell_text_for_gui_html)
+                    # THEN, replace the newline characters with HTML <br> tags
+                    df_html['Text'] = df_html['Text'].str.replace('\n', '<br />\n')
+                # --- END FIX ---
                 
                 if 'Themes' in df_html.columns:
                     df_html['Themes'] = df_html['Themes'].apply(
@@ -2842,18 +2910,18 @@ class QPostViewer:
                 if 'Datetime_UTC' in df_html.columns and pd.api.types.is_datetime64_any_dtype(df_html['Datetime_UTC']):
                     df_html['Datetime_UTC'] = df_html['Datetime_UTC'].dt.strftime('%Y-%m-%d %H:%M:%S %Z')
                 
-                if 'ImagesJSON' in df_html.columns: # Example if you export complex data
+                if 'ImagesJSON' in df_html.columns: 
                      df_html['ImagesJSON'] = df_html['ImagesJSON'].apply(lambda x: html.escape(str(x)) if isinstance(x, list) else "")
 
                 html_table = df_html.to_html(escape=False, index=False, border=0, classes='qposts_table', na_rep="")
                 css = """<style>body{font-family:Arial,sans-serif;margin:20px;background-color:#f4f4f4;color:#333}h1{color:#333;text-align:center}.qposts_table{border-collapse:collapse;width:95%;margin:20px auto;background-color:#fff;box-shadow:0 0 10px rgba(0,0,0,.1)}.qposts_table th,.qposts_table td{border:1px solid #ddd;padding:10px;text-align:left;vertical-align:top}.qposts_table th{background-color:#4CAF50;color:#fff}.qposts_table tr:nth-child(even){background-color:#f9f9f9}.qposts_table tr:hover{background-color:#e2f0e8}.qposts_table td a{color:#007bff;text-decoration:none}.qposts_table td a:hover{text-decoration:underline}.qposts_table td{word-wrap:break-word;max-width:600px;min-width:100px;}</style>"""
-                html_full = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Q Posts GUI Export</title>{css}</head><body><h1>Q Posts Export</h1>{html_table}</body></html>""" # Changed html_full_table to html_table
+                html_full = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Q Posts GUI Export</title>{css}</head><body><h1>Q Posts Export</h1>{html_table}</body></html>""" 
 
                 with open(final_filename, 'w', encoding='utf-8') as f:
                     f.write(html_full)
                 messagebox.showinfo("Success", f"Exported {len(df_for_export)} posts to {final_filename}", parent=self.root)
                 
-                try: # Try to open the exported HTML file
+                try: 
                     webbrowser.open_new_tab(f"file://{os.path.realpath(final_filename)}")
                 except Exception as e:
                     print(f"Could not auto-open HTML: {e}")
